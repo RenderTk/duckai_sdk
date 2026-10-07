@@ -11,7 +11,6 @@ Requires Python 3.11 or newer.
 
 ```sh
 python -m pip install "git+https://github.com/RenderTk/duckai_sdk.git"
-python -m playwright install chromium
 ```
 
 Or install your local checkout:
@@ -20,13 +19,22 @@ Or install your local checkout:
 git clone https://github.com/RenderTk/duckai_sdk.git
 cd duckai_sdk
 python -m pip install -e .
-python -m playwright install chromium
 ```
 
-On Linux, install Chromium's system dependencies with
-`python -m playwright install --with-deps chromium`. The default browser mode needs
-a display. For a Linux machine without a desktop, install Xvfb and run your script
-with `xvfb-run -a python your_script.py`.
+Normal installs provide only the `duckai` SDK and its dependencies. The desktop
+chat app stays in this repository under `example/`; it is excluded from wheels and
+source distributions. PySide6 is installed only if you explicitly select the
+`desktop` extra. Importing or installing the SDK never starts the desktop app.
+
+The SDK downloads its matching Chromium build on the first request if it is not
+already cached, then runs it headlessly. No browser window, display, Xvfb, API key,
+or copied browser token is required. The first run can take longer while downloading
+the browser; later clients reuse the cache. To preinstall it for an offline build or
+deployment, run `python -m playwright install chromium --no-shell`.
+
+On Linux, Chromium's OS libraries must be installed in the environment. You can
+install them with `python -m playwright install --with-deps chromium --no-shell`.
+The SDK does not change system packages or request administrator permissions.
 
 ## Your first chat
 
@@ -185,7 +193,7 @@ and conversations also provide `events()`.
 
 ## How it works
 
-On your first chat, the SDK starts an isolated Chromium session. It reads Duck.ai's
+On your first chat, the SDK starts an isolated headless Chromium session. It reads Duck.ai's
 current frontend version and the browser's actual user agent, bootstraps an anonymous
 session, and fetches a fresh browser challenge. Chromium evaluates the challenge
 inside Duck.ai's own page; the SDK hashes the returned client values and constructs
@@ -197,10 +205,19 @@ reuse the browser while obtaining fresh challenges. There is no local API server
 between your code and Duck.ai. No HAR file, account, or captured token is needed at
 runtime. Prompts and attached files are sent to Duck.ai.
 
-**Chromium is still required.** The working default opens a regular browser window
-with a temporary profile. Headless/automated mode was rejected by Duck.ai in live
-checks, so `DuckAI(headless=True)` is an optional setting, not a guaranteed way to
-hide the browser. For Linux without a desktop, use Xvfb as described above.
+**Chromium runs silently by default.** The SDK manages a full Chromium process in
+unified headless mode with a temporary profile, performs the challenge, and closes
+it when the client closes. It configures the headless page's identity from the
+running browser's actual platform/version. No visible-browser fallback happens
+when Duck.ai rejects a request. Use `DuckAI(headless=False)` only when you explicitly
+want a browser window for debugging.
+
+Automatic browser installation has its own timeout (300 seconds by default),
+separate from challenge generation and chat response timeouts. It happens only
+when the bundled browser is missing. Disable it with
+`DuckAI(browser_auto_install=False)` in environments where dependencies are
+provisioned ahead of time. A supplied executable or CDP endpoint is always used
+without downloading a replacement.
 
 You can select an installed Chromium executable with
 `DuckAI(browser_executable="/absolute/path/to/chromium")`, or attach to an existing
@@ -237,23 +254,32 @@ Rate limits and challenge rejections are propagated without automatic retries.
 This is an unofficial client for Duck.ai's web endpoint, so upstream behavior and
 availability can change.
 
+## Repository desktop example
+
+For a complete native desktop chat application, see [Duck.ai Desktop](example/README.md).
+Clone this repository, install with `python -m pip install -e '.[desktop]'`, then run
+`python -m example` from the repository root. It includes streaming, saved
+conversations, Markdown, attachments, themes, and conversation import/export.
+The app is an optional example of using the SDK; normal SDK installs do not include it.
+
 ## Development and verification
 
 ```sh
 python -m pip install -e '.[dev]'
 python -m pytest -q
-python -m ruff check duckai tests scripts examples
+python -m ruff check duckai tests scripts examples example
 ```
 
 Unit tests cover direct requests, anonymous-token refresh, synchronous and
 asynchronous streams, native attachments, history isolation, interrupted replies,
-rate limits, cancellation, and resource cleanup. They do not need Chromium or a
+headless startup, automatic browser setup, rate limits, cancellation, and resource
+cleanup. They do not need Chromium or a
 live Duck.ai connection.
 
 To run live semantic checks with synthetic PDFs and images:
 
 ```sh
-python scripts/verify_live.py
+python scripts/verify_live.py --interval 30
 ```
 
 This makes six chat requests and writes an ignored report in `output/`. Duck.ai

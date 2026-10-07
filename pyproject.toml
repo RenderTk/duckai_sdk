@@ -22,15 +22,18 @@ Repository = "https://github.com/RenderTk/duckai_sdk"
 
 [project.optional-dependencies]
 dev = ["pytest>=8,<10", "ruff>=0.9,<1"]
+desktop = ["PySide6>=6.8,<7"]
 
 [tool.setuptools.packages.find]
-include = ["duckai*"]
+include = ["duckai", "duckai.*"]
+exclude = ["example", "example.*", "examples", "examples.*", "tests", "tests.*"]
 
 [tool.setuptools.package-data]
 duckai = ["py.typed"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["."]
 
 [tool.ruff]
 target-version = "py311"

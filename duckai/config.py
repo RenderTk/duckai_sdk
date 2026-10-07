@@ -20,7 +20,9 @@ class Settings(BaseSettings):
     duckai_headers_json: dict[str, str] = Field(default_factory=dict)
     proxy_api_key: str | None = None
     duckai_auto_token: bool = True
-    duckai_browser_headless: bool = False
+    duckai_browser_headless: bool = True
+    duckai_browser_auto_install: bool = True
+    browser_install_timeout: float = Field(default=300, gt=0)
     duckai_browser_executable: str | None = None
     duckai_browser_channel: str | None = None
     duckai_browser_cdp_url: str | None = None

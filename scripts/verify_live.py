@@ -6,11 +6,13 @@ import io
 import json
 import secrets
 import tempfile
+import time
 from datetime import UTC, datetime
 from pathlib import Path
 
 from PIL import Image, ImageDraw
 
+import duckai
 from duckai import AsyncDuckAI, Attachment, DuckAI
 
 
@@ -52,6 +54,12 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, default=Path("output/sdk-live-verification.json"))
     parser.add_argument(
+        "--interval",
+        type=float,
+        default=0,
+        help="Seconds between requests, to pace live checks without automatic retries",
+    )
+    parser.add_argument(
         "--checks",
         nargs="+",
         choices=[
@@ -72,6 +80,8 @@ def main():
         ],
     )
     args = parser.parse_args()
+    if args.interval < 0:
+        parser.error("--interval must be nonnegative")
     selected = set(args.checks)
     code = "SDK-" + secrets.token_hex(3).upper()
     count = 2 + secrets.randbelow(3)
@@ -80,6 +90,9 @@ def main():
         "passed": False,
         "expected_check_count": len(selected),
         "checks": [],
+        "headless_default": True,
+        "sdk_source": duckai.__file__,
+        "request_interval_seconds": args.interval,
     }
 
     def record(name, response, expected):
@@ -96,9 +109,12 @@ def main():
         print(f"{name}: complete={response.done}, passed={passed}", flush=True)
         if not passed:
             raise RuntimeError(f"{name} failed: {response.text!r}")
+        if args.interval:
+            time.sleep(args.interval)
 
     async def verify_async():
         async with AsyncDuckAI() as ai:
+            report["headless_default"] &= ai.settings.duckai_browser_headless
             if "async_chat" in selected:
                 record("async_chat", await ai.chat("What is 8 + 9? Reply only the number."), "17")
             if "async_stream" in selected:
@@ -110,6 +126,7 @@ def main():
     try:
         if selected & {"sync_chat", "sync_stream", "pdf_and_image", "conversation_followup"}:
             with DuckAI() as ai:
+                report["headless_default"] &= ai._client.settings.duckai_browser_headless
                 if "sync_chat" in selected:
                     record("sync_chat", ai.chat("What is 13 + 29? Reply only the number."), "42")
                 if "sync_stream" in selected:

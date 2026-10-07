@@ -35,6 +35,7 @@ class AsyncDuckAI:
         headless: bool | None = None,
         browser_executable: str | None = None,
         browser_cdp_url: str | None = None,
+        browser_auto_install: bool | None = None,
         timeout: float | None = None,
         headers: dict[str, str] | None = None,
         transport: httpx.AsyncBaseTransport | None = None,
@@ -44,6 +45,7 @@ class AsyncDuckAI:
             "duckai_browser_headless": headless,
             "duckai_browser_executable": browser_executable,
             "duckai_browser_cdp_url": browser_cdp_url,
+            "duckai_browser_auto_install": browser_auto_install,
             "upstream_read_timeout": timeout,
             "duckai_headers_json": headers,
         }

@@ -121,6 +121,7 @@ def test_sync_chat_calls_duckai_directly_and_keeps_one_loop_and_opaque_history()
 
 @pytest.mark.anyio
 async def test_async_generates_fresh_tokens_without_a_server(monkeypatch):
+    monkeypatch.setattr(AnonymousTokenProvider, "_prepare_runtime", AsyncMock())
     monkeypatch.setattr(
         AnonymousTokenProvider,
         "_browser_metadata",

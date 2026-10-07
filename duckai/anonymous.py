@@ -4,7 +4,10 @@ import asyncio
 import base64
 import json
 import os
+import signal
 import socket
+import subprocess
+import sys
 import tempfile
 import time
 import uuid
@@ -56,6 +59,7 @@ class AnonymousTokenProvider:
         self._page = None
         self._process = None
         self._profile = None
+        self._install_process = None
 
     async def close(self):
         try:
@@ -69,7 +73,90 @@ class AnonymousTokenProvider:
                     await self._playwright.stop()
             finally:
                 self._page = self._browser = self._playwright = None
-                await self._stop_regular_browser()
+                try:
+                    await self._stop_installer()
+                finally:
+                    await self._stop_regular_browser()
+
+    async def _prepare_runtime(self):
+        """Provision the bundled browser without consuming the challenge timeout."""
+        if (
+            self.settings.duckai_browser_cdp_url
+            or self.settings.duckai_browser_executable
+            or self.settings.duckai_browser_channel
+        ):
+            return
+        if self._playwright is None:
+            self._playwright = await asyncio.wait_for(
+                async_playwright().start(), timeout=self.settings.token_generation_timeout
+            )
+        executable = Path(self._playwright.chromium.executable_path)
+        if executable.is_file():
+            return
+        if not self.settings.duckai_browser_auto_install:
+            raise BrowserError("Chromium is missing and automatic installation is disabled")
+        process_options = (
+            {"creationflags": subprocess.CREATE_NO_WINDOW}
+            if os.name == "nt"
+            else {"start_new_session": True}
+        )
+        try:
+            self._install_process = await asyncio.create_subprocess_exec(
+                sys.executable,
+                "-m",
+                "playwright",
+                "install",
+                "chromium",
+                "--no-shell",
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.DEVNULL,
+                **process_options,
+            )
+            try:
+                code = await asyncio.wait_for(
+                    self._install_process.wait(), timeout=self.settings.browser_install_timeout
+                )
+            except TimeoutError as error:
+                raise BrowserError("Chromium automatic installation timed out") from error
+            if code != 0 or not executable.is_file():
+                raise BrowserError("Chromium automatic installation failed")
+        finally:
+            await self._stop_installer()
+
+    async def _stop_installer(self):
+        process, self._install_process = self._install_process, None
+        if process is None or process.returncode is not None:
+            return
+        if os.name == "nt":
+            # Python's Playwright CLI owns a Node child. Terminating only Python
+            # would leave that child downloading after cancellation on Windows.
+            killer = await asyncio.create_subprocess_exec(
+                "taskkill",
+                "/PID",
+                str(process.pid),
+                "/T",
+                "/F",
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.DEVNULL,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000),
+            )
+            await killer.wait()
+        with suppress(ProcessLookupError):
+            if os.name == "nt":
+                process.terminate()
+            else:
+                # The CLI launches a Node child. Its own process group lets us
+                # clean up the whole download if the caller cancels startup.
+                os.killpg(process.pid, signal.SIGTERM)
+        try:
+            await asyncio.wait_for(process.wait(), timeout=5)
+        except TimeoutError:
+            with suppress(ProcessLookupError):
+                if os.name == "nt":
+                    process.kill()
+                else:
+                    os.killpg(process.pid, signal.SIGKILL)
+            await process.wait()
 
     async def _stop_regular_browser(self):
         try:
@@ -88,15 +175,17 @@ class AnonymousTokenProvider:
                 self._profile.cleanup()
                 self._profile = None
 
-    async def _launch_regular_browser(self):
+    async def _launch_chromium(self):
         await self._stop_regular_browser()
         executable = (
             self.settings.duckai_browser_executable or self._playwright.chromium.executable_path
         )
         if not Path(executable).is_file():
             raise BrowserError("Chromium executable is missing")
-        # A real browser debugging session, isolated from the user's profiles.
-        # A nonzero debugging port preserves the browser's normal runtime behavior.
+        # Launch full Chromium directly, isolated from the user's profiles. The
+        # headless shell and Playwright's automation launch defaults were rejected
+        # in live checks. Unified headless Chromium works with the same challenge
+        # evaluator as a visible browser and never needs a desktop window.
         with socket.socket() as sock:
             sock.bind(("127.0.0.1", 0))
             port = sock.getsockname()[1]
@@ -118,6 +207,11 @@ class AnonymousTokenProvider:
             "--disable-features=GlobalMediaControls,MediaRouter,Translate,OptimizationHints,PaintHolding",
             "about:blank",
         ]
+        if self.settings.duckai_browser_headless:
+            arguments[0:0] = [
+                "--headless=new",
+                "--disable-blink-features=AutomationControlled",
+            ]
         # Chromium cannot start as root in a container with its OS sandbox enabled.
         if hasattr(os, "geteuid") and os.geteuid() == 0:
             arguments.insert(0, "--no-sandbox")
@@ -131,7 +225,7 @@ class AnonymousTokenProvider:
         async with httpx.AsyncClient(trust_env=False, timeout=1) as probe:
             while True:
                 if self._process.returncode is not None:
-                    raise BrowserError("Chromium exited during startup; a display is required")
+                    raise BrowserError("Chromium exited during startup")
                 try:
                     response = await probe.get(f"{endpoint}/json/version")
                     if response.is_success:
@@ -155,17 +249,19 @@ class AnonymousTokenProvider:
                     self._browser = await self._playwright.chromium.connect_over_cdp(
                         self.settings.duckai_browser_cdp_url
                     )
-                elif (
-                    not self.settings.duckai_browser_headless
-                    and not self.settings.duckai_browser_channel
-                ):
-                    self._browser = await self._launch_regular_browser()
+                elif not self.settings.duckai_browser_channel:
+                    self._browser = await self._launch_chromium()
                 else:
+                    if self.settings.duckai_browser_headless:
+                        options["args"] = ["--disable-blink-features=AutomationControlled"]
+                        options["ignore_default_args"] = ["--enable-automation"]
                     self._browser = await self._playwright.chromium.launch(**options)
             if self.settings.duckai_browser_cdp_url or self._process is not None:
                 self._page = await self._browser.contexts[0].new_page()
             else:
                 self._page = await self._browser.new_page()
+            if self.settings.duckai_browser_headless:
+                await self._configure_headless_page()
             await self._page.goto(ORIGIN, wait_until="domcontentloaded")
             await self._page.wait_for_selector("iframe#jsa", state="attached")
         return await self._page.evaluate("""() => ({
@@ -173,6 +269,19 @@ class AnonymousTokenProvider:
             version: `${document.documentElement.getAttribute('data-version-tag')}-${
                 document.documentElement.getAttribute('data-version-sha')}`
         })""")
+
+    async def _configure_headless_page(self):
+        # Use the running browser's platform and version, rather than a static
+        # fingerprint. The headless-specific UA marker also caused challenge
+        # rejection in live checks. CDP updates the page's JS and HTTP identity
+        # together, and the setting applies to the challenge iframe as well.
+        user_agent = await self._page.evaluate("navigator.userAgent")
+        if "HeadlessChrome/" in user_agent:
+            session = await self._page.context.new_cdp_session(self._page)
+            await session.send(
+                "Network.setUserAgentOverride",
+                {"userAgent": user_agent.replace("HeadlessChrome/", "Chrome/")},
+            )
 
     async def _solve(self, challenge: str):
         element = await self._page.query_selector("iframe#jsa")
@@ -185,9 +294,19 @@ class AnonymousTokenProvider:
         # Serialize iframe access, but chats themselves can run concurrently.
         async with self._lock:
             try:
+                await self._prepare_runtime()
                 return await asyncio.wait_for(
                     self._generate(), timeout=self.settings.token_generation_timeout
                 )
+            except asyncio.CancelledError:
+                # Cancellation can interrupt navigation or evaluation inside the
+                # challenge iframe. A later request needs a fresh page, rather
+                # than reusing one whose initialisation never finished.
+                if self._page is not None:
+                    page, self._page = self._page, None
+                    with suppress(TimeoutError, BrowserError):
+                        await asyncio.wait_for(page.close(), timeout=5)
+                raise
             except (TimeoutError, httpx.TimeoutException) as exc:
                 # Discard a page with an unfinished challenge before the next request.
                 if self._page is not None:
@@ -204,8 +323,7 @@ class AnonymousTokenProvider:
                     503,
                     detail=(
                         "Chromium token generation failed. Run `playwright install chromium`, "
-                        "check that a display is available (Xvfb on Linux), or set "
-                        "DUCKAI_BROWSER_EXECUTABLE to an installed Chromium browser."
+                        "or set DUCKAI_BROWSER_EXECUTABLE to an installed Chromium browser."
                     ),
                 ) from exc
             except httpx.HTTPStatusError as exc:
