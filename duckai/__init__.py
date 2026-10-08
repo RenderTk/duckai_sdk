@@ -4,6 +4,7 @@ from duckai.catalog import Model, ModelInfo, get_model, list_models
 from duckai.client import AsyncChatStream, AsyncDuckAI
 from duckai.config import Settings
 from duckai.conversation import AsyncConversation
+from duckai.documents import supported_file_extensions
 from duckai.errors import (
     AttachmentError,
     ChallengeError,
@@ -36,4 +37,5 @@ __all__ = [
     "Settings",
     "get_model",
     "list_models",
+    "supported_file_extensions",
 ]

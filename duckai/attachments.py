@@ -1,7 +1,7 @@
 """Duck.ai's inline attachment protocol, observed in the live web client.
 
 PDFs stay binary/base64; images are decoded, oriented, resized, and encoded as
-WebP like the browser canvas. No document text is substituted for the attachment.
+WebP like the browser canvas. Office exports use bounded local text extraction.
 """
 
 import base64
@@ -17,6 +17,7 @@ from pypdf.errors import PyPdfError
 
 from duckai.catalog import get_model
 from duckai.config import Settings
+from duckai.documents import DOCUMENT_PREFIX, prepare_document, supported_file_extensions
 from duckai.errors import AttachmentError
 from duckai.models import ChatRequest
 
@@ -76,8 +77,15 @@ class Attachments:
 
     def limits(self, model: str) -> dict[str, Any]:
         info = get_model(model)
+        documents = {
+            "document_text_supported": True,
+            "document_upload_bytes": self.settings.max_document_upload_bytes,
+            "document_message_text_characters": self.settings.max_document_text_characters,
+            "supported_file_extensions": list(supported_file_extensions()),
+        }
         if info and not info.supports_images and not info.supports_pdf:
             return {
+                **documents,
                 "model": model,
                 "image_supported": False,
                 "pdf_supported": False,
@@ -88,6 +96,7 @@ class Attachments:
             }
         profile = profile_for(model)
         return {
+            **documents,
             "model": model,
             "image_supported": True,
             "image_mime_types": list(IMAGE_MIMES.values()),
@@ -192,10 +201,26 @@ class Attachments:
     def prepare(self, data: bytes, filename: str, mime: str, model: str) -> dict[str, Any]:
         if not data:
             fail(422, "empty_attachment", "Files must not be empty.")
+        document = prepare_document(data, filename, self.settings)
+        if document is not None:
+            return document
         return self._prepare(data, filename, mime, model)
 
     def validate_payload(self, body: ChatRequest):
         messages = [m for m in body.messages if m.role == "user" and isinstance(m.content, list)]
+        for message in messages:
+            text = [p.get("text", "") for p in message.content if p.get("type") == "text"]
+            if (
+                any(isinstance(t, str) and t.startswith(DOCUMENT_PREFIX) for t in text)
+                and sum(len(t) for t in text if isinstance(t, str))
+                > self.settings.max_document_text_characters
+            ):
+                fail(
+                    413,
+                    "document_text_limit",
+                    "The prompt and documents exceed the text limit. "
+                    "Attach smaller sections or fewer files.",
+                )
         if not any(p.get("type") in {"image", "file"} for m in messages for p in m.content):
             return
         profile = profile_for(body.model)

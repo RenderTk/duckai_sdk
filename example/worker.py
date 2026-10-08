@@ -17,7 +17,10 @@ def friendly_error(error: Exception) -> str:
         )
         return "Duck.ai rate limited this session." + wait
     if isinstance(error, AttachmentError):
-        return f"Attachment rejected: {error.detail}"
+        detail = error.detail
+        if isinstance(detail, dict):
+            detail = detail.get("message", detail.get("error", detail))
+        return f"Attachment rejected: {detail}"
     if isinstance(error, ChallengeError):
         return "Duck.ai rejected the browser challenge. Check browser settings and try again."
     if "Executable doesn't exist" in str(error):

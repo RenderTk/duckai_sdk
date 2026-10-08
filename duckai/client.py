@@ -103,7 +103,9 @@ class AsyncDuckAI:
         if isinstance(files, (str, Path, Attachment)):
             raise TypeError("Pass files as a sequence, for example files=[Path('report.pdf')]")
         parts = []
-        limit = max(PDF_BYTES, self.settings.max_image_upload_bytes)
+        limit = max(
+            PDF_BYTES, self.settings.max_image_upload_bytes, self.settings.max_document_upload_bytes
+        )
         for file in files:
             attachment = (
                 file
@@ -127,7 +129,7 @@ class AsyncDuckAI:
         *,
         model: str | None = None,
     ) -> list[dict[str, Any]]:
-        """Return validated native content parts without contacting Duck.ai."""
+        """Return validated native or locally extracted text parts without contacting Duck.ai."""
         self._check_open()
         selected = model or self.model
         parts = await asyncio.to_thread(self._prepare_files, files, selected)

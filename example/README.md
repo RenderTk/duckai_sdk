@@ -50,7 +50,8 @@ The chat backend does not need a display; the native desktop interface does.
 - Independent conversations, automatic titles, pinning, renaming, deletion, and
   search across conversation titles and visible message content.
 - Drafts and attachment selections retained when switching conversations.
-- PDF/image selection and file drops onto the composer, with removable file chips.
+- Office documents, spreadsheets, presentations, Google Workspace exports,
+  PDFs and images through the attachment picker or file drops, with removable chips.
 - Canonical SDK history retained, including encoded attachments and opaque response
   fields. Regeneration and edits with unchanged attachments do not require the
   original source file after a successful turn.
@@ -85,6 +86,21 @@ include three PDFs per conversation, 15 pages per PDF, 5 MiB combined PDF bytes,
 three images per message, five images per conversation, and 4,500 text characters
 in messages containing images. Supported image formats: PNG, JPEG, WebP, and GIF.
 Duck.ai determines model availability and may change upstream limits.
+
+Office and Google exports are read locally by the SDK and sent as labeled text.
+This also works on text-only models. The default document limits are 20 MiB per
+file and 16,000 characters for all extracted content, filename labels and prompt
+combined; the limit is 4,500 when images share the message. Use smaller sections
+for long reports or large spreadsheets. Regeneration and editing retain extracted
+text even after the source file is removed. Original layout, embedded images and
+formula recalculation are not included in text extraction.
+
+Modern files work with the normal SDK installation. Legacy Word/PowerPoint,
+Publisher and binary Visio need a local LibreOffice installation; conversion runs
+headlessly. Unsupported suite formats show specific export instructions.
+See the [complete format guide](../docs/file-formats.md). Google Docs, Sheets and
+Slides must be downloaded/exported first; `.gdoc`/`.gsheet`/`.gslides` shortcuts
+are links rather than readable documents.
 
 ## Keyboard shortcuts
 

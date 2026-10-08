@@ -36,6 +36,7 @@ from PySide6.QtWidgets import (
 )
 
 from duckai import get_model
+from duckai.documents import EXPORT_GUIDANCE, file_kind, supported_file_extensions
 from example.model_picker import PREMIUM_MESSAGE, ModelPicker
 from example.store import Chat, Store, Turn
 from example.theme import DARK, LIGHT, icon, stylesheet
@@ -418,10 +419,12 @@ class MainWindow(QMainWindow):
         composer_layout.addWidget(self.prompt)
         controls = QHBoxLayout()
         self.attach_button = tool(
-            "attach", "Attach PDF or image · You can also drop files", self.choose_files
+            "attach",
+            "Attach documents, spreadsheets, slides, PDFs or images · You can also drop files",
+            self.choose_files,
         )
         controls.addWidget(self.attach_button)
-        self.attachment_hint = label("PDFs & images", muted=True)
+        self.attachment_hint = label("Documents & images", muted=True)
         controls.addWidget(self.attachment_hint)
         controls.addStretch()
         self.character_count = label("", muted=True)
@@ -630,9 +633,11 @@ class MainWindow(QMainWindow):
     def choose_files(self):
         paths, _ = QFileDialog.getOpenFileNames(
             self,
-            "Attach PDF or image",
+            "Attach files",
             "",
-            "Supported files (*.pdf *.png *.jpg *.jpeg *.webp *.gif);;All files (*)",
+            "Supported files ("
+            + " ".join("*" + ext for ext in supported_file_extensions())
+            + ");;All files (*)",
         )
         self.add_files(paths)
 
@@ -643,21 +648,21 @@ class MainWindow(QMainWindow):
         for value in paths:
             path = Path(value).expanduser().resolve()
             info = get_model(self.chat.model)
-            if info and (
-                not info.supports_images
-                or (path.suffix.lower() == ".pdf" and not info.supports_pdf)
+            kind = file_kind(path.name)
+            if path.suffix.lower() in EXPORT_GUIDANCE:
+                rejected.append(path.name + " (" + EXPORT_GUIDANCE[path.suffix.lower()] + ")")
+            elif info and (
+                (kind == "image" and not info.supports_images)
+                or (kind == "pdf" and not info.supports_pdf)
             ):
                 rejected.append(path.name + f" ({info.name} does not support this attachment)")
-            elif path.suffix.lower() not in {".pdf", ".png", ".jpg", ".jpeg", ".webp", ".gif"}:
+            elif kind is None:
                 rejected.append(path.name + " (unsupported format)")
             elif not path.is_file():
                 rejected.append(path.name + " (not a file)")
             elif str(path) not in self.chat.draft_files:
-                pdf = path.suffix.lower() == ".pdf"
-                same_kind = sum(
-                    (Path(p).suffix.lower() == ".pdf") == pdf for p in self.chat.draft_files
-                )
-                if same_kind >= 3:
+                same_kind = sum(file_kind(p) == kind for p in self.chat.draft_files)
+                if kind != "document" and same_kind >= 3:
                     rejected.append(path.name + " (attach up to three PDFs and three images)")
                 else:
                     self.chat.draft_files.append(str(path))
@@ -723,14 +728,18 @@ class MainWindow(QMainWindow):
         self.premium_warning.setVisible(premium)
         self.send_button.setAccessibleName("Stop response" if busy else "Send message")
         self.prompt.setReadOnly(busy)
-        can_attach = info is None or info.supports_images
-        self.attach_button.setEnabled(not busy and can_attach and not premium)
+        self.attach_button.setEnabled(not busy and not premium)
         self.attachment_hint.setText(
-            "Text only"
-            if not can_attach
-            else "Images"
+            "Documents"
+            if info and not info.supports_images
+            else "Documents & images"
             if info and not info.supports_pdf
-            else "PDFs & images"
+            else "Documents, PDFs & images"
+        )
+        self.attachment_hint.setToolTip(
+            "Office and Google exports are read locally and sent as text. "
+            "16,000 characters including your prompt; 4,500 when combined with images. "
+            "Legacy Word/PowerPoint, Publisher and Visio files need LibreOffice."
         )
         self.model.setEnabled(not busy)
         for card in self.cards:
@@ -764,7 +773,8 @@ class MainWindow(QMainWindow):
             if previous.request_message and previous.files == files:
                 replay = deepcopy(previous.request_message)
                 if isinstance(replay.get("content"), list):
-                    parts = [p for p in replay["content"] if p.get("type") != "text"]
+                    # The first part is the prompt; subsequent text parts are documents.
+                    parts = replay["content"][1:]
                     replay["content"] = [{"type": "text", "text": prompt}] + parts
                 else:
                     replay["content"] = prompt

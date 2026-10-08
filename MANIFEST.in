@@ -2,3 +2,4 @@ prune example
 prune examples
 prune scripts
 prune tests
+include docs/file-formats.md

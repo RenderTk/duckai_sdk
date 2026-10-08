@@ -180,6 +180,27 @@ def test_stop_partial_navigation_and_rate_limit_retry(window):
     assert len(requests) == 3  # No automatic request retries.
 
 
+def test_office_export_replay_edit_and_text_only_model(window, tmp_path):
+    widget, requests, _, _ = window
+    widget.model.choose(Model.MISTRAL_SMALL_4)
+    path = tmp_path / "budget.csv"
+    path.write_text("item,amount\nWidget,42\n")
+    widget.add_files([str(path)])
+    assert widget.chat.draft_files == [str(path)]
+    send(widget, "Summarize this spreadsheet")
+    assert widget.chat.turns[-1].status == "complete"
+    content = requests[0]["messages"][0]["content"]
+    assert "Widget,42" in content[1]["text"]
+    path.unlink()
+    widget.retry()
+    wait_for(lambda: widget.active_id is None)
+    assert requests[1]["messages"][0]["content"] == content
+    widget.edit_last()
+    send(widget, "What is the amount?")
+    assert requests[2]["messages"][0]["content"][0]["text"] == "What is the amount?"
+    assert requests[2]["messages"][0]["content"][1] == content[1]
+
+
 def test_drafts_search_theme_and_native_screens(window, tmp_path):
     widget, _, _, _ = window
     first = widget.chat
@@ -262,7 +283,8 @@ def test_picker_attachment_rules_and_disabled_during_streaming(window, tmp_path)
     path = tmp_path / "image.png"
     Image.new("RGB", (32, 32)).save(path)
     widget.model.choose(Model.MISTRAL_SMALL_4)
-    assert not widget.attach_button.isEnabled()
+    assert widget.attach_button.isEnabled()
+    assert widget.attachment_hint.text() == "Documents"
     widget.add_files([str(path)])
     assert not widget.chat.draft_files
     widget.model.choose(Model.GEMMA_4_31B)

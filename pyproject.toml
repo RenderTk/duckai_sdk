@@ -13,6 +13,10 @@ dependencies = [
   "playwright>=1.50,<2",
   "pillow>=11,<13",
   "pypdf>=5,<7",
+  "defusedxml>=0.7,<1",
+  "python-calamine>=0.8,<1",
+  "striprtf>=0.0.29,<1",
+  "olefile>=0.47,<1",
   "pydantic>=2.7,<3",
   "pydantic-settings>=2.7,<3",
 ]

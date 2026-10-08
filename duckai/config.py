@@ -32,6 +32,10 @@ class Settings(BaseSettings):
     max_collected_bytes: int = Field(default=8 * 1024 * 1024, gt=0)
     max_image_upload_bytes: int = Field(default=10 * 1024 * 1024, gt=0)
     max_image_pixels: int = Field(default=20_000_000, gt=0)
+    max_document_upload_bytes: int = Field(default=20 * 1024 * 1024, gt=0)
+    max_document_text_characters: int = Field(default=16_000, gt=0, le=16_000)
+    office_converter_executable: str | None = None
+    office_conversion_timeout: float = Field(default=60, gt=0)
 
     @field_validator("duckai_headers_json")
     @classmethod

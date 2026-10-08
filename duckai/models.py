@@ -59,6 +59,11 @@ class PDFAttachment(BaseModel):
     content: str = Field(description="The original PDF bytes encoded as base64")
 
 
+class TextAttachment(BaseModel):
+    type: Literal["text"] = "text"
+    text: str = Field(description="Locally extracted document content, labeled with its filename")
+
+
 class PreparedAttachments(BaseModel):
     model: str
-    content: list[ImageAttachment | PDFAttachment]
+    content: list[ImageAttachment | PDFAttachment | TextAttachment]

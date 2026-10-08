@@ -2,7 +2,7 @@
 
 Talk to [Duck.ai](https://duck.ai/) directly from Python. The SDK handles anonymous
 sessions, browser challenges, request headers, streaming, conversation history,
-and PDF/image attachments. You don't need to start a FastAPI server or copy tokens
+and document/PDF/image attachments. You don't need to start a FastAPI server or copy tokens
 from your browser.
 
 ## Install
@@ -134,7 +134,7 @@ Chunks arrive as text becomes available. The stream context manager also closes
 the upstream connection if you break out of the loop. For a conversation, use
 `with chat.stream("Follow up") as stream:` in the same way.
 
-## PDFs and images
+## Documents, PDFs and images
 
 Pass file paths in `files`:
 
@@ -175,9 +175,41 @@ The observed anonymous limits for the default model are:
 - Text in a message containing images: up to 4,500 characters.
 
 `ai.attachment_limits()` returns the configured limits. `ai.prepare_files([...])`
-returns native content parts without making a network request, useful when you
+returns native or extracted text parts without making a network request, useful when you
 manage your own message history. Prepared PDFs/images still count toward the limits
 when included in later messages.
+
+Word, Excel, PowerPoint, OpenDocument and downloaded Google Workspace exports
+use the same `files` argument. They are read locally and sent to Duck.ai as
+filename-labeled text, including on text-only models:
+
+```python
+from duckai import DuckAI, Model, supported_file_extensions
+
+with DuckAI(model=Model.MISTRAL_SMALL_4) as ai:
+    result = ai.chat(
+        "Compare the report, budget and presentation.",
+        files=["report.docx", "budget.xlsx", "briefing.pptx"],
+    )
+    print(result.text)
+    print(ai.attachment_limits())
+
+print(supported_file_extensions())
+```
+
+Readers are included in the standard SDK installation. Legacy Word/PowerPoint,
+Publisher and binary Visio files additionally need LibreOffice for silent local
+conversion. Documents default to 20 MiB per file and 16,000 extracted characters
+per message **including the prompt and filename labels** (4,500 when combined
+with images). Oversized content is rejected with instructions to attach a smaller
+section; it is not silently cut off. Set lower limits through `Settings` or the
+environment. Extraction preserves text, tables, spreadsheet values and OOXML
+formula source, and presentation speaker notes; it does not upload the original
+Office file, render its layout, read embedded images, or recalculate formulas.
+
+See [the file format guide](docs/file-formats.md) for every supported extension,
+conversion setup, and export guidance for OneNote, Access, Project, Outlook
+archives and Google shortcut files. Google Drive access is not required.
 
 ## Async applications
 
