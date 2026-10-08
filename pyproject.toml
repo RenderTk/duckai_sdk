@@ -22,7 +22,7 @@ Repository = "https://github.com/RenderTk/duckai_sdk"
 
 [project.optional-dependencies]
 dev = ["pytest>=8,<10", "ruff>=0.9,<1"]
-desktop = ["PySide6>=6.8,<7"]
+desktop = ["PySide6>=6.8,<7", "Pygments>=2.18,<3", "markdown-it-py>=3,<5"]
 
 [tool.setuptools.packages.find]
 include = ["duckai", "duckai.*"]

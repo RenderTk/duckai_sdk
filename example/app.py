@@ -7,6 +7,7 @@ from PySide6.QtCore import QSignalBlocker, Qt, QTimer
 from PySide6.QtGui import QAction, QColor, QKeySequence, QPalette
 from PySide6.QtWidgets import (
     QApplication,
+    QButtonGroup,
     QCheckBox,
     QComboBox,
     QDialog,
@@ -34,6 +35,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from duckai import get_model
+from example.model_picker import PREMIUM_MESSAGE, ModelPicker
 from example.store import Chat, Store, Turn
 from example.theme import DARK, LIGHT, icon, stylesheet
 from example.widgets import (
@@ -74,7 +77,7 @@ class SettingsDialog(QDialog):
         self.model = QLineEdit(preferences["model"])
         form.addRow("Default model ID", self.model)
         info = label(
-            "You can also enter a model ID in the chat header.\n"
+            "Choose a model from the button in the message composer.\n"
             "Model availability is controlled by Duck.ai.",
             muted=True,
         )
@@ -153,6 +156,10 @@ class SettingsDialog(QDialog):
     def validate(self):
         if not self.model.text().strip():
             QMessageBox.information(self, "Model required", "Enter a default model ID.")
+            return
+        info = get_model(self.model.text().strip())
+        if info and info.access_tier != "free":
+            QMessageBox.information(self, "Premium model unavailable", PREMIUM_MESSAGE)
             return
         self.accept()
 
@@ -292,24 +299,33 @@ class MainWindow(QMainWindow):
         self.header_title = label("Duck.ai", name="headerTitle")
         self.header_title.setMaximumWidth(470)
         title_col.addWidget(self.header_title)
-        self.model = QComboBox()
-        self.model.setObjectName("model")
-        self.model.setEditable(True)
-        self.model.addItems([store_model := self.store.preferences["model"]])
-        if store_model != "gpt-6-luna":
-            self.model.addItem("gpt-6-luna")
-        self.model.setMinimumWidth(150)
-        self.model.setMaximumWidth(260)
-        self.model.setToolTip("Model ID · Enter an ID supported by your Duck.ai session")
-        self.model.setAccessibleName("Model ID")
-        self.model.lineEdit().editingFinished.connect(self.model_changed)
-        self.model.activated.connect(lambda _: self.model_changed())
-        title_col.addWidget(self.model)
         header.addLayout(title_col)
         header.addStretch()
         self.connection_label = label("ANONYMOUS SESSION", name="eyebrow")
         header.addWidget(self.connection_label)
         header.addSpacing(8)
+        self.theme_switch = QFrame()
+        self.theme_switch.setObjectName("themeSwitch")
+        self.theme_switch.setAccessibleName("Color theme")
+        theme_layout = QHBoxLayout(self.theme_switch)
+        theme_layout.setContentsMargins(3, 3, 3, 3)
+        theme_layout.setSpacing(2)
+        self.theme_group = QButtonGroup(self)
+        self.theme_buttons = {}
+        for value, title, symbol in (("light", "Light", "sun"), ("dark", "Dark", "moon")):
+            button = QPushButton(title)
+            button.setObjectName("themeChoice")
+            button.setProperty("iconName", symbol)
+            button.setCheckable(True)
+            button.setCursor(Qt.CursorShape.PointingHandCursor)
+            button.setToolTip(f"Switch to {value} mode")
+            button.setAccessibleName(f"{title} mode")
+            button.clicked.connect(lambda checked=False, theme=value: self.set_theme(theme))
+            self.theme_group.addButton(button)
+            self.theme_buttons[value] = button
+            theme_layout.addWidget(button)
+        header.addWidget(self.theme_switch)
+        header.addSpacing(4)
         header.addWidget(tool("more", "Conversation options", self.header_menu))
         main.addLayout(header)
         main.addSpacing(14)
@@ -405,17 +421,26 @@ class MainWindow(QMainWindow):
             "attach", "Attach PDF or image · You can also drop files", self.choose_files
         )
         controls.addWidget(self.attach_button)
-        controls.addWidget(label("PDFs & images", muted=True))
+        self.attachment_hint = label("PDFs & images", muted=True)
+        controls.addWidget(self.attachment_hint)
         controls.addStretch()
         self.character_count = label("", muted=True)
         self.character_count.setStyleSheet("font-size: 11px;")
         controls.addWidget(self.character_count)
         controls.addSpacing(10)
+        self.model = ModelPicker(self.store.preferences["model"])
+        self.model.changed.connect(self.model_changed)
+        controls.addWidget(self.model)
+        controls.addSpacing(5)
         self.send_button = tool("send", "Send message · Enter", self.send_or_stop)
         self.send_button.setObjectName("send")
         self.send_button.setFixedSize(40, 40)
         controls.addWidget(self.send_button)
         composer_layout.addLayout(controls)
+        self.premium_warning = label(PREMIUM_MESSAGE, name="premiumWarning")
+        self.premium_warning.setWordWrap(True)
+        self.premium_warning.hide()
+        composer_layout.addWidget(self.premium_warning)
         composer_row.addWidget(self.composer, 20)
         composer_row.addStretch()
         main.addLayout(composer_row)
@@ -478,6 +503,7 @@ class MainWindow(QMainWindow):
             palette.setColor(role, QColor(color))
         QApplication.instance().setPalette(palette)
         QApplication.instance().setStyleSheet(stylesheet(c))
+        self.theme_buttons["dark" if dark else "light"].setChecked(True)
         for button in self.findChildren(QPushButton) + self.findChildren(type(self.attach_button)):
             name = button.property("iconName")
             if name:
@@ -489,7 +515,10 @@ class MainWindow(QMainWindow):
         self.update_controls()
 
     def toggle_theme(self):
-        self.store.preferences["theme"] = "light" if self.colors is DARK else "dark"
+        self.set_theme("light" if self.colors is DARK else "dark")
+
+    def set_theme(self, theme):
+        self.store.preferences["theme"] = theme
         self.apply_theme()
         self.schedule_save()
 
@@ -581,6 +610,10 @@ class MainWindow(QMainWindow):
             return
         self.chat.model = model
         self.store.preferences["model"] = model
+        info = get_model(model)
+        if info and self.store.preferences["reasoning"] not in info.reasoning_efforts:
+            self.store.preferences["reasoning"] = info.default_reasoning_effort
+        self.update_controls()
         self.schedule_save()
 
     def draft_changed(self):
@@ -609,7 +642,13 @@ class MainWindow(QMainWindow):
         rejected = []
         for value in paths:
             path = Path(value).expanduser().resolve()
-            if path.suffix.lower() not in {".pdf", ".png", ".jpg", ".jpeg", ".webp", ".gif"}:
+            info = get_model(self.chat.model)
+            if info and (
+                not info.supports_images
+                or (path.suffix.lower() == ".pdf" and not info.supports_pdf)
+            ):
+                rejected.append(path.name + f" ({info.name} does not support this attachment)")
+            elif path.suffix.lower() not in {".pdf", ".png", ".jpg", ".jpeg", ".webp", ".gif"}:
                 rejected.append(path.name + " (unsupported format)")
             elif not path.is_file():
                 rejected.append(path.name + " (not a file)")
@@ -671,18 +710,31 @@ class MainWindow(QMainWindow):
 
     def update_controls(self):
         busy = self.active_id is not None
+        info = get_model(self.chat.model) if self.chat else None
+        premium = info is not None and info.access_tier != "free"
         has_input = bool(self.prompt.toPlainText().strip()) or bool(
             self.chat and self.chat.draft_files
         )
-        self.send_button.setEnabled(self.worker_ready and (busy or has_input))
+        self.send_button.setEnabled(self.worker_ready and (busy or (has_input and not premium)))
         self.send_button.setIcon(icon("stop" if busy else "send", self.colors["background"]))
         self.send_button.setToolTip("Stop response · Esc" if busy else "Send message · Enter")
+        if premium and not busy:
+            self.send_button.setToolTip(PREMIUM_MESSAGE)
+        self.premium_warning.setVisible(premium)
         self.send_button.setAccessibleName("Stop response" if busy else "Send message")
         self.prompt.setReadOnly(busy)
-        self.attach_button.setEnabled(not busy)
+        can_attach = info is None or info.supports_images
+        self.attach_button.setEnabled(not busy and can_attach and not premium)
+        self.attachment_hint.setText(
+            "Text only"
+            if not can_attach
+            else "Images"
+            if info and not info.supports_pdf
+            else "PDFs & images"
+        )
         self.model.setEnabled(not busy)
         for card in self.cards:
-            card.retry.setEnabled(not busy and self.worker_ready)
+            card.retry.setEnabled(not busy and self.worker_ready and not premium)
             card.edit.setEnabled(not busy)
         count = len(self.prompt.toPlainText())
         self.character_count.setText(f"{count:,} characters" if count else "")
@@ -695,6 +747,10 @@ class MainWindow(QMainWindow):
 
     def send(self):
         if self.active_id or not self.worker_ready:
+            return
+        info = get_model(self.model.currentText())
+        if info and info.access_tier != "free":
+            self.notify(PREMIUM_MESSAGE)
             return
         prompt = self.prompt.toPlainText().strip()
         files = list(self.chat.draft_files)
@@ -753,6 +809,10 @@ class MainWindow(QMainWindow):
 
     def retry(self):
         if self.active_id or not self.worker_ready or not self.chat.turns:
+            return
+        info = get_model(self.chat.model)
+        if info and info.access_tier != "free":
+            self.notify(PREMIUM_MESSAGE)
             return
         turn = self.chat.turns[-1]
         # Canonical user content contains encoded attachments and opaque fields.

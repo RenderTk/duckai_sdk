@@ -1,8 +1,8 @@
 """Reusable native controls for the desktop example."""
 
-import re
 from pathlib import Path
 
+from markdown_it import MarkdownIt
 from PySide6.QtCore import QSize, Qt, QUrl, Signal
 from PySide6.QtGui import (
     QBrush,
@@ -20,6 +20,7 @@ from PySide6.QtGui import (
     QTextDocument,
     QTextFormat,
     QTextLength,
+    QTextTable,
     QTextTableFormat,
 )
 from PySide6.QtWidgets import (
@@ -37,6 +38,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from example.code_view import CodeBlock
 from example.theme import icon
 
 
@@ -198,7 +200,7 @@ class PromptEdit(QPlainTextEdit):
             super().dropEvent(event)
 
 
-class MarkdownView(QTextBrowser):
+class MarkdownText(QTextBrowser):
     """Content-driven height inside a single transcript scroll area.
 
     Model text cannot load local files/images or execute arbitrary URL schemes.
@@ -214,6 +216,9 @@ class MarkdownView(QTextBrowser):
         self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.document().setDocumentMargin(2)
+        font = QFont(self.font())
+        font.setPixelSize(15)
+        self.document().setDefaultFont(font)
         self.document().documentLayout().documentSizeChanged.connect(self.fit_height)
         self.anchorClicked.connect(self.open_link)
         self.source_text = ""
@@ -246,6 +251,7 @@ class MarkdownView(QTextBrowser):
             | QTextDocument.MarkdownFeature.MarkdownNoHTML,
         )
         self.style_blocks()
+        self.style_tables()
         self.fit_height()
 
     def style_blocks(self):
@@ -285,7 +291,24 @@ class MarkdownView(QTextBrowser):
             elif block.textList():
                 fmt.setTopMargin(3)
                 fmt.setBottomMargin(3)
+            if fmt.property(QTextFormat.Property.BlockQuoteLevel):
+                fmt.setLeftMargin(18)
+                fmt.setBackground(QColor(self.colors["surface"]))
             cursor.setBlockFormat(fmt)
+            fragment = block.begin()
+            while not fragment.atEnd():
+                part = fragment.fragment()
+                char = part.charFormat()
+                if char.fontFixedPitch() or "monospace" in (char.fontFamilies() or []):
+                    char.setFont(code_font)
+                    char.setBackground(QColor(self.colors["code"]))
+                    selection = QTextCursor(self.document())
+                    selection.setPosition(part.position())
+                    selection.setPosition(
+                        part.position() + part.length(), QTextCursor.MoveMode.KeepAnchor
+                    )
+                    selection.mergeCharFormat(char)
+                fragment += 1
             block = block.next()
         # A native table gives each fenced block a continuous, padded background.
         # Work backwards so replacing a group does not shift remaining positions.
@@ -318,6 +341,33 @@ class MarkdownView(QTextBrowser):
                 QTextCursor(code_block).setBlockFormat(fmt)
                 code_block = code_block.next()
 
+    def style_tables(self):
+        def visit(frame):
+            for child in frame.childFrames():
+                if isinstance(child, QTextTable) and child.format().background().color() != QColor(
+                    self.colors["code"]
+                ):
+                    fmt = child.format()
+                    fmt.setBorder(1)
+                    fmt.setBorderBrush(QBrush(QColor(self.colors["border"])))
+                    fmt.setBorderCollapse(True)
+                    fmt.setCellPadding(9)
+                    fmt.setCellSpacing(0)
+                    fmt.setWidth(QTextLength(QTextLength.Type.PercentageLength, 100))
+                    child.setFormat(fmt)
+                    for row in range(child.rows()):
+                        for column in range(child.columns()):
+                            cell = child.cellAt(row, column)
+                            cell_format = cell.format()
+                            background = (
+                                "hover" if row == 0 else "surface" if row % 2 else "background"
+                            )
+                            cell_format.setBackground(QColor(self.colors[background]))
+                            cell.setFormat(cell_format)
+                visit(child)
+
+        visit(self.document().rootFrame())
+
     def fit_height(self, *_):
         self.document().setTextWidth(max(100, self.viewport().width()))
         self.setFixedHeight(max(30, int(self.document().size().height()) + 12))
@@ -325,6 +375,78 @@ class MarkdownView(QTextBrowser):
     def resizeEvent(self, event):
         super().resizeEvent(event)
         self.fit_height()
+
+
+MARKDOWN = MarkdownIt("commonmark", {"html": False}).enable(["table", "strikethrough"])
+
+
+def reply_segments(text):
+    """Use CommonMark source maps for complete and still-streaming fences."""
+    lines = text.splitlines(keepends=True)
+    segments = []
+    previous = 0
+    for token in MARKDOWN.parse(text):
+        if token.type not in {"fence", "code_block"} or token.map is None:
+            continue
+        start, end = token.map
+        prose = "".join(lines[previous:start])
+        if prose.strip():
+            segments.append(("markdown", "", prose))
+        language = token.info.strip().split()[0] if token.info.strip() else ""
+        segments.append(("code", language, token.content))
+        previous = end
+    prose = "".join(lines[previous:])
+    if prose.strip():
+        segments.append(("markdown", "", prose))
+    return segments or [("markdown", "", text or "Thinking…")]
+
+
+class MarkdownView(QWidget):
+    """Incremental native Markdown text and independent code cards."""
+
+    def __init__(self):
+        super().__init__()
+        self.source_text = ""
+        self.parts = []
+        self.content_layout = QVBoxLayout(self)
+        self.content_layout.setContentsMargins(0, 0, 0, 0)
+        self.content_layout.setSpacing(12)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+
+    def set_content(self, text, colors):
+        self.source_text = text
+        segments = reply_segments(text)
+        for index, (kind, language, value) in enumerate(segments):
+            cls = CodeBlock if kind == "code" else MarkdownText
+            if index < len(self.parts) and not isinstance(self.parts[index], cls):
+                old = self.parts[index]
+                self.content_layout.removeWidget(old)
+                old.setParent(None)
+                old.deleteLater()
+                self.parts[index] = cls()
+                self.content_layout.insertWidget(index, self.parts[index])
+            elif index == len(self.parts):
+                self.parts.append(cls())
+                self.content_layout.addWidget(self.parts[-1])
+            widget = self.parts[index]
+            if kind == "code":
+                widget.set_content(value, language, colors)
+            elif widget.source_text != value or widget.colors != colors:
+                widget.set_content(value, colors)
+        while len(self.parts) > len(segments):
+            old = self.parts.pop()
+            self.content_layout.removeWidget(old)
+            old.setParent(None)
+            old.deleteLater()
+
+    def toPlainText(self):
+        return "\n\n".join(
+            part.source_code if isinstance(part, CodeBlock) else part.toPlainText()
+            for part in self.parts
+        )
+
+    def code_blocks(self):
+        return [part for part in self.parts if isinstance(part, CodeBlock)]
 
 
 class MessageCard(QWidget):
@@ -405,14 +527,14 @@ class MessageCard(QWidget):
         self.status.setText(text)
         self.status.setVisible(bool(text))
         self.copy.setEnabled(bool(self.turn.answer))
-        self.code.setVisible("```" in self.turn.answer)
+        self.code.setVisible(bool(self.body.code_blocks()))
 
     def copy_response(self):
         QApplication.clipboard().setText(self.turn.answer)
         self.copy.setToolTip("Copied to clipboard")
 
     def copy_code(self):
-        blocks = re.findall(r"```[^\n]*\n(.*?)```", self.turn.answer, re.DOTALL)
+        blocks = [part.source_code for part in self.body.code_blocks()]
         QApplication.clipboard().setText("\n\n".join(block.rstrip() for block in blocks))
 
 

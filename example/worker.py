@@ -5,7 +5,7 @@ from copy import deepcopy
 
 from PySide6.QtCore import QThread, Signal
 
-from duckai import AsyncDuckAI, AttachmentError, ChallengeError, RateLimitError
+from duckai import AsyncDuckAI, AttachmentError, ChallengeError, RateLimitError, get_model
 
 
 def friendly_error(error: Exception) -> str:
@@ -92,13 +92,17 @@ class ChatWorker(QThread):
                     **{key: value for key, value in config.items() if value != ""}
                 )
                 self.configuration = config
+            info = get_model(model)
+            reasoning = preferences["reasoning"]
+            if info and reasoning not in info.reasoning_efforts:
+                reasoning = info.default_reasoning_effort
             async with self.client.stream(
                 prompt,
                 messages=history,
                 files=files,
                 model=model,
-                can_use_tools=preferences["tools"],
-                reasoning_effort=preferences["reasoning"],
+                can_use_tools=preferences["tools"] and (info is None or info.supports_tools),
+                reasoning_effort=reasoning,
             ) as stream:
                 async for chunk in stream:
                     self.delta.emit(chat_id, chunk)

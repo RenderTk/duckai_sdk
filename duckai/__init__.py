@@ -1,5 +1,6 @@
 """Duck.ai from Python, with no API server to run."""
 
+from duckai.catalog import Model, ModelInfo, get_model, list_models
 from duckai.client import AsyncChatStream, AsyncDuckAI
 from duckai.config import Settings
 from duckai.conversation import AsyncConversation
@@ -29,6 +30,10 @@ __all__ = [
     "DuckAIError",
     "IncompleteResponseError",
     "Message",
+    "Model",
+    "ModelInfo",
     "RateLimitError",
     "Settings",
+    "get_model",
+    "list_models",
 ]

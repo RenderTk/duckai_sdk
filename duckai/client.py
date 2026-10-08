@@ -10,6 +10,7 @@ import httpx
 
 from duckai.anonymous import AnonymousTokenProvider
 from duckai.attachments import PDF_BYTES, Attachments
+from duckai.catalog import get_model, list_models
 from duckai.config import Settings
 from duckai.errors import ChallengeError, DuckAIError, IncompleteResponseError, RateLimitError
 from duckai.models import ChatRequest, Message
@@ -94,6 +95,10 @@ class AsyncDuckAI:
     def attachment_limits(self, model: str | None = None) -> dict[str, Any]:
         return self._attachments.limits(model or self.model)
 
+    def list_models(self, *, include_subscriber: bool = True):
+        """Return known chat models and capabilities; subscription access is upstream."""
+        return list_models(include_subscriber=include_subscriber)
+
     def _prepare_files(self, files: Sequence[FileInput], model: str) -> list[dict[str, Any]]:
         if isinstance(files, (str, Path, Attachment)):
             raise TypeError("Pass files as a sequence, for example files=[Path('report.pdf')]")
@@ -172,6 +177,14 @@ class AsyncDuckAI:
             if isinstance(content, str):
                 content = [{"type": "text", "text": content}]
             history[-1]["content"] = content + parts
+        info = get_model(selected)
+        if info:
+            options.setdefault("reasoningEffort", info.default_reasoning_effort)
+            options.setdefault("canUseTools", info.supports_tools)
+            if options["reasoningEffort"] not in info.reasoning_efforts:
+                raise ValueError(
+                    f"{info.name} supports reasoning efforts: {', '.join(info.reasoning_efforts)}"
+                )
         body = ChatRequest(model=selected, messages=history, **options)
         await asyncio.to_thread(self._attachments.validate_payload, body)
         return body

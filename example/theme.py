@@ -79,7 +79,26 @@ def icon(name: str, color: str = "#727d90", size: int = 20) -> QIcon:
     }
     for line in paths.get(name, []):
         painter.drawLine(*line)
-    if name == "spark":
+    if name == "sun":
+        painter.drawEllipse(8, 8, 8, 8)
+        for x, y, xx, yy in [
+            (12, 2, 12, 5),
+            (12, 19, 12, 22),
+            (2, 12, 5, 12),
+            (19, 12, 22, 12),
+            (5, 5, 7, 7),
+            (17, 17, 19, 19),
+            (5, 19, 7, 17),
+            (17, 7, 19, 5),
+        ]:
+            painter.drawLine(x, y, xx, yy)
+    elif name == "moon":
+        path = QPainterPath()
+        path.addEllipse(4, 3, 16, 17)
+        cutout = QPainterPath()
+        cutout.addEllipse(10, 0, 15, 15)
+        painter.fillPath(path.subtracted(cutout), QColor(color))
+    elif name == "spark":
         path = QPainterPath(QPointF(12, 1))
         for x, y in [(15, 9), (23, 12), (15, 15), (12, 23), (9, 15), (1, 12), (9, 9)]:
             path.lineTo(x, y)
@@ -147,6 +166,10 @@ def stylesheet(c: dict) -> str:
     #brand {{ font-size: 22px; font-weight: 600; }}
     #eyebrow {{ color: {c["muted"]}; font-size: 10px; font-weight: 600; letter-spacing: 2px; }}
     #headerTitle {{ font-size: 20px; font-weight: 500; }}
+    #themeSwitch {{ background: {c["surface"]}; border: 1px solid {c["border"]};
+        border-radius: 17px; }}
+    #themeChoice {{ padding: 6px 10px; border-radius: 13px; font-size: 11px; }}
+    #themeChoice:checked {{ background: {c["selected"]}; color: {c["text"]}; }}
     #subtitle {{ font-size: 17px; color: {c["muted"]}; }}
     #section {{ font-size: 11px; color: {c["muted"]}; font-weight: 600; }}
     QPushButton, QToolButton {{ border: none; border-radius: 10px;
@@ -171,7 +194,30 @@ def stylesheet(c: dict) -> str:
     QComboBox::drop-down {{ border: none; width: 20px; }}
     QComboBox QAbstractItemView {{ background: {c["surface"]}; color: {c["text"]};
         selection-background-color: {c["selected"]}; border: 1px solid {c["border"]}; }}
-    #model {{ background: transparent; border: none; padding: 5px 8px; font-size: 12px; }}
+    #modelButton {{ background: {c["hover"]}; border: 1px solid {c["border"]};
+        border-radius: 19px; padding: 8px 15px; font-size: 13px; font-weight: 500; }}
+    #modelButton:hover, #modelButton:focus {{ background: {c["selected"]}; }}
+    #modelPopup {{ background: transparent; }}
+    #modelSurface {{ background: {c["surface"]}; border: 1px solid {c["border"]};
+        border-radius: 22px; }}
+    #modelList, #modelViewport {{ background: {c["surface"]}; }}
+    #modelMenuTitle {{ font-size: 14px; padding: 2px 12px 8px; }}
+    #premiumNotice {{ background: {c["accent_soft"]}; border-radius: 11px; }}
+    #premiumTitle {{ color: {c["accent"]}; font-size: 12px; font-weight: 600; }}
+    #premiumBadge {{ background: {c["hover"]}; color: {c["muted"]};
+        border-radius: 7px; padding: 4px 6px; font-size: 10px; }}
+    #premiumWarning {{ color: {c["accent"]}; font-size: 11px; padding: 3px 2px; }}
+    #modelGroup {{ font-size: 12px; padding: 12px 10px 3px; font-weight: 600; }}
+    #modelOption {{ border-radius: 13px; padding: 0; }}
+    #modelOption[selected="true"] {{ background: {c["selected"]}; }}
+    #modelOption:focus {{ background: {c["hover"]}; border: 1px solid {c["accent"]}; }}
+    #modelName {{ font-size: 14px; font-weight: 600; }}
+    #modelName[available="true"] {{ color: {c["text"]}; }}
+    #modelName[available="false"] {{ color: {c["muted"]}; }}
+    #modelDescription {{ font-size: 11px; }}
+    #modelBadge {{ font-size: 19px; font-weight: 600; }}
+    #modelCheck {{ font-size: 19px; color: {c["accent"]}; }}
+    #modelCustom {{ font-size: 12px; color: {c["muted"]}; margin-top: 6px; }}
     QListWidget {{ background: transparent; border: none; outline: none; }}
     QListWidget::item {{ border-radius: 10px; }}
     QScrollArea, #transcript, QTextBrowser {{ background: transparent; border: none; }}
@@ -186,6 +232,16 @@ def stylesheet(c: dict) -> str:
     #notice {{ background: {c["accent_soft"]}; color: {c["accent"]};
         border-radius: 9px; padding: 10px 14px; font-size: 12px; }}
     #messageStatus {{ color: {c["muted"]}; font-size: 12px; }}
+    #codeCard {{ background: {c["code"]}; border: 1px solid {c["border"]};
+        border-radius: 13px; }}
+    #codeHeader {{ background: {c["hover"]}; border-top-left-radius: 12px;
+        border-top-right-radius: 12px; }}
+    #codeLanguage {{ font-size: 12px; color: {c["muted"]}; font-weight: 600; }}
+    #codeAction {{ padding: 5px 8px; font-size: 11px; border-radius: 7px; }}
+    #codeAction:hover, #codeAction:checked {{ background: {c["selected"]}; }}
+    #codeEditor {{ background: {c["code"]}; color: {c["text"]};
+        border: none; padding: 8px 6px; font-size: 13px;
+        selection-background-color: {c["selected"]}; }}
     QMenu {{ background: {c["background"]}; border: 1px solid {c["border"]};
         border-radius: 9px; padding: 6px; }}
     QMenu::item {{ padding: 8px 24px; border-radius: 5px; }}

@@ -15,6 +15,7 @@ from PIL import Image, ImageOps, UnidentifiedImageError
 from pypdf import PdfReader
 from pypdf.errors import PyPdfError
 
+from duckai.catalog import get_model
 from duckai.config import Settings
 from duckai.errors import AttachmentError
 from duckai.models import ChatRequest
@@ -74,9 +75,21 @@ class Attachments:
         self.settings = settings
 
     def limits(self, model: str) -> dict[str, Any]:
+        info = get_model(model)
+        if info and not info.supports_images and not info.supports_pdf:
+            return {
+                "model": model,
+                "image_supported": False,
+                "pdf_supported": False,
+                "image_mime_types": [],
+                "pdfs_per_conversation": 0,
+                "images_per_message": 0,
+                "images_per_conversation": 0,
+            }
         profile = profile_for(model)
         return {
             "model": model,
+            "image_supported": True,
             "image_mime_types": list(IMAGE_MIMES.values()),
             "pdf_supported": profile.supports_pdf,
             "pdfs_per_conversation": PDF_COUNT if profile.supports_pdf else 0,

@@ -20,9 +20,9 @@ pytest.importorskip("PySide6")
 from PySide6.QtCore import Qt  # noqa: E402
 from PySide6.QtGui import QFont  # noqa: E402
 from PySide6.QtTest import QTest  # noqa: E402
-from PySide6.QtWidgets import QApplication  # noqa: E402
+from PySide6.QtWidgets import QApplication, QLabel  # noqa: E402
 
-from duckai import AsyncDuckAI, Settings  # noqa: E402
+from duckai import AsyncDuckAI, Model, Settings, list_models  # noqa: E402  # noqa: E402
 from example.app import MainWindow, SettingsDialog  # noqa: E402
 from example.store import Store  # noqa: E402
 from example.worker import ChatWorker  # noqa: E402
@@ -210,3 +210,113 @@ def test_drafts_search_theme_and_native_screens(window, tmp_path):
     assert widget.cards[-1].body.width() <= widget.message_column.width()
     widget.persist()
     assert Store(widget.store.directory).preferences["theme"] == "dark"
+
+
+def test_composer_picker_routes_every_free_model_and_restores_selection(window, monkeypatch):
+    widget, requests, _, clients = window
+    assert widget.model.parent() is widget.composer
+    for info in list_models(include_subscriber=False):
+        widget.model.open_popup()
+        row = widget.model.popup.rows[info.id]
+        QTest.mouseClick(row, Qt.MouseButton.LeftButton)
+        assert not widget.model.popup.isVisible()
+        assert widget.chat.model == info.id
+        assert widget.model.popup.checks[info.id].text() == "✓"
+        send(widget, "Hello from the selected model")
+        assert requests[-1]["model"] == info.id
+        assert requests[-1]["reasoningEffort"] in info.reasoning_efforts
+        assert requests[-1]["canUseTools"] == info.supports_tools
+        assert widget.chat.turns[-1].model == info.id
+    assert len(clients) == 1
+    for info in list_models():
+        assert widget.model.popup.rows[info.id].isEnabled() == (info.access_tier == "free")
+    widget.persist()
+    restored = Store(widget.store.directory)
+    assert restored.preferences["model"] == Model.GEMMA_4_31B
+    assert restored.chats[0].model == Model.GEMMA_4_31B
+    widget.model.open_popup()
+    row = widget.model.popup.rows[Model.GEMMA_4_31B]
+    QTest.keyClick(row, Qt.Key.Key_Home)
+    first = widget.model.popup.rows[Model.GPT_6_LUNA]
+    assert first.hasFocus()
+    QTest.keyClick(first, Qt.Key.Key_Escape)
+    assert not widget.model.popup.isVisible()
+    assert widget.chat.model == Model.GEMMA_4_31B
+    widget.model.open_popup()
+    QTest.keyClick(row, Qt.Key.Key_Home)
+    QTest.keyClick(first, Qt.Key.Key_Down)
+    second = widget.model.popup.rows[Model.GPT_5_4_MINI]
+    assert second.hasFocus()
+    QTest.keyClick(second, Qt.Key.Key_Return)
+    assert widget.chat.model == Model.GPT_5_4_MINI
+    assert not widget.model.popup.isVisible()
+    monkeypatch.setattr(
+        "example.model_picker.QInputDialog.getText", lambda *args, **kwargs: ("future-model", True)
+    )
+    widget.model.popup.custom_model()
+    assert widget.chat.model == "future-model"
+
+
+def test_picker_attachment_rules_and_disabled_during_streaming(window, tmp_path):
+    widget, _, _, _ = window
+    path = tmp_path / "image.png"
+    Image.new("RGB", (32, 32)).save(path)
+    widget.model.choose(Model.MISTRAL_SMALL_4)
+    assert not widget.attach_button.isEnabled()
+    widget.add_files([str(path)])
+    assert not widget.chat.draft_files
+    widget.model.choose(Model.GEMMA_4_31B)
+    assert widget.attach_button.isEnabled()
+    widget.add_files([str(tmp_path / "file.pdf")])
+    assert not widget.chat.draft_files
+    widget.model.choose(Model.GPT_6_LUNA)
+    widget.prompt.setPlainText("slow")
+    widget.send()
+    wait_for(lambda: bool(widget.chat.turns[-1].answer))
+    assert not widget.model.isEnabled() and not widget.model.popup.isVisible()
+    widget.stop()
+    wait_for(lambda: widget.active_id is None)
+    assert widget.model.isEnabled()
+
+
+def test_visible_theme_switch_and_unsupported_premium_models(window, monkeypatch):
+    widget, requests, _, _ = window
+    for theme in ("dark", "light"):
+        QTest.mouseClick(widget.theme_buttons[theme], Qt.MouseButton.LeftButton)
+        assert widget.store.preferences["theme"] == theme
+        assert widget.theme_buttons[theme].isChecked()
+        widget.persist()
+        assert Store(widget.store.directory).preferences["theme"] == theme
+    widget.model.open_popup()
+    assert widget.model.popup.premium_notice.isVisible()
+    assert (
+        "aren't supported yet" in widget.model.popup.premium_notice.findChildren(QLabel)[0].text()
+    )
+    widget.model.popup.hide()
+    send(widget, "A free-model reply")
+    previous_answer = widget.chat.turns[-1].answer
+    widget.model.setCurrentText(
+        Model.GPT_5_6_TERRA
+    )  # Imported/old workspace or manual configuration.
+    widget.model_changed()
+    widget.prompt.setPlainText("Keep this draft")
+    assert widget.premium_warning.isVisible()
+    assert not widget.send_button.isEnabled()
+    assert "aren't supported yet" in widget.send_button.toolTip()
+    QTest.keyClick(widget.prompt, Qt.Key.Key_Return)
+    widget.retry()
+    assert len(requests) == 1
+    assert widget.prompt.toPlainText() == "Keep this draft"
+    assert widget.chat.turns[-1].answer == previous_answer
+    widget.model.choose(Model.GPT_6_LUNA)
+    assert not widget.premium_warning.isVisible() and widget.send_button.isEnabled()
+    messages = []
+    monkeypatch.setattr(
+        "example.app.QMessageBox.information",
+        lambda parent, title, message: messages.append(message),
+    )
+    dialog = SettingsDialog(widget.store.preferences, widget.store.directory, widget)
+    dialog.model.setText(Model.GPT_5_6_SOL)
+    dialog.validate()
+    assert messages and "aren't supported yet" in messages[0]
+    assert dialog.result() != dialog.DialogCode.Accepted

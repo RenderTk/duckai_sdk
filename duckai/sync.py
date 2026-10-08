@@ -70,6 +70,10 @@ class DuckAI:
         self._check()
         return self._client.attachment_limits(model)
 
+    def list_models(self, *, include_subscriber: bool = True):
+        self._check()
+        return self._client.list_models(include_subscriber=include_subscriber)
+
     def conversation(self, **options: Any):
         self._check()
         return Conversation(self, self._client.conversation(**options))

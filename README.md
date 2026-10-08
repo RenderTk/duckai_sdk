@@ -50,6 +50,50 @@ with DuckAI() as ai:
 when you finish. Keep one client open across requests so its browser can be reused.
 The browser starts only when the first request needs an anonymous token.
 
+## Choosing a model
+
+Use `Model` constants or a Duck.ai wire ID with either client, including per-request
+overrides. The SDK chooses the model's default reasoning effort and tool support.
+
+```python
+from duckai import DuckAI, Model, list_models
+
+for model in list_models(include_subscriber=False):
+    print(model.id, model.name, model.supports_images, model.supports_pdf)
+
+with DuckAI(model=Model.CLAUDE_HAIKU_4_5) as ai:
+    print(ai.chat("Help me draft a friendly introduction.").text)
+    print(ai.chat("Explain this concept.", model=Model.MISTRAL_SMALL_4).text)
+```
+
+`list_models()` and `ai.list_models()` return an immutable catalogue without
+network access. `get_model(id)` returns its metadata or `None` for an unknown ID.
+The catalogue was verified against Duck.ai's live frontend on October 7, 2026:
+
+| Model | Wire ID | Access | Attachments |
+| --- | --- | --- | --- |
+| GPT-6 Luna | `gpt-6-luna` | Free | Images, PDFs |
+| GPT-5.4 mini | `gpt-5.4-mini` | Free | Images, PDFs |
+| Claude Haiku 4.5 | `claude-haiku-4-5` | Free | Images, PDFs |
+| Mistral Small 4 | `mistral-small-2603` | Free | Text only |
+| gpt-oss 120B | `tinfoil/gpt-oss-120b` | Free | Text only |
+| Gemma 4 31B (beta) | `tinfoil/gemma4-31b` | Free | Images |
+| GPT-5.6 Terra | `gpt-5.6-terra` | Plus | Images, PDFs |
+| Claude Sonnet 4.6 | `claude-sonnet-4-6` | Plus | Images, PDFs |
+| GPT-5.6 Sol | `gpt-5.6-sol` | Pro | Images, PDFs |
+| Claude Opus 4.8 | `claude-opus-4-8` | Pro | Images, PDFs |
+
+The SDK creates anonymous sessions by default. Listing or selecting a subscription
+model does not grant access: Duck.ai enforces the session's entitlement. This SDK
+does not implement subscription login. The desktop example enables the six free
+models and displays subscription models as unavailable in its anonymous session.
+Voice and image-generation services use separate protocols and are not chat models
+in this catalogue.
+
+Unknown and future model IDs still pass through to Duck.ai. For known models,
+explicit reasoning efforts must appear in `model.reasoning_efforts`; gpt-oss defaults
+to `low`, Mistral to `none`. Use `ai.attachment_limits(model)` for attachment rules.
+
 ## Follow-up questions
 
 Use a conversation when you want the model to remember previous turns:

@@ -36,8 +36,15 @@ The chat backend does not need a display; the native desktop interface does.
 
 ## What is included
 
-- Streamed Markdown replies with headings, lists, tables, and fenced code blocks.
-- Copy a complete reply or just its fenced code blocks to the system clipboard.
+- Rich streamed Markdown with clear headings, lists, blockquotes, inline code,
+  links, and padded tables with header styling and alternating rows.
+- Native code cards with language labels, syntax highlighting, line numbers,
+  horizontal scrolling, optional line wrapping, and collapse/expand controls.
+  Copy each snippet or save it as a UTF-8 source file. Long snippets have their own
+  scroll area. Unknown languages remain readable as plain text.
+- Copy a complete reply as Markdown or all its code blocks to the clipboard.
+  CommonMark parsing handles backtick/tilde fences, indented code, and partially
+  streamed snippets. Existing code cards retain wrapping/collapse state during streaming.
 - Stop requests, retry failures, regenerate the last reply, or edit and resend the
   last prompt. Partial replies remain visible but are excluded from model context.
 - Independent conversations, automatic titles, pinning, renaming, deletion, and
@@ -50,8 +57,19 @@ The chat backend does not need a display; the native desktop interface does.
 - JSON export/import for continuing conversations, plus readable Markdown export.
 - Light, dark, and system appearance; a collapsible sidebar; a jump-to-latest button
   that respects your position while reading older messages.
-- An editable model selector. The default is `gpt-6-luna`; enter another model ID
-  supported by your Duck.ai session. The app does not claim an authoritative catalogue.
+  Use the **Light / Dark** switch in the chat header for an immediate change, or
+  **Settings → Appearance** to follow the system theme. The choice is saved.
+- A rounded model button in the composer, with a scrollable native popup, provider
+  badges, descriptions, a selected-model checkmark, and keyboard navigation.
+  All six free Duck.ai models are selectable. Plus/Pro models are listed with their
+  subscription requirement and disabled for this example's anonymous sessions.
+  The selection persists per conversation and becomes the default for new chats.
+  A custom-ID action supports future models. Reasoning defaults and attachment
+  controls follow the selected model's capabilities.
+  A prominent **Premium models aren't supported yet** notice explains the current
+  limitation. Premium rows show **Not yet** badges and cannot be selected. Imported
+  or previously configured premium conversations keep their history and drafts,
+  and show an inline notice until you choose a free model.
 - Settings for timeout, tools, reasoning effort, Chromium executable, browser CDP
   URL, and silent browser mode (enabled by default).
 - Atomic local saves, restrictive workspace file permissions where supported,
@@ -115,6 +133,8 @@ Connection for debugging; that choice persists.
 
 - `app.py`: native window, conversation controls, settings, and state transitions.
 - `widgets.py` / `theme.py`: reusable controls, Markdown, icons, and themes.
+- `code_view.py`: native snippet viewer, Pygments syntax highlighting, and per-snippet actions.
+- `model_picker.py`: composer model button and native selection popup, using the SDK catalogue.
 - `worker.py`: owns `AsyncDuckAI` in a `QThread` running an asyncio event loop.
   Qt signals carry text deltas and outcomes to the GUI thread. Only a completed
   stream commits canonical request/response messages to history.
