@@ -3,8 +3,6 @@
 from copy import deepcopy
 from pathlib import Path
 
-from duckai import get_model
-from duckai.documents import EXPORT_GUIDANCE, file_kind, supported_file_extensions
 from PySide6.QtCore import QSignalBlocker, Qt, QTimer
 from PySide6.QtGui import QAction, QColor, QKeySequence, QPalette
 from PySide6.QtWidgets import (
@@ -37,6 +35,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from duckai import get_model
+from duckai.documents import EXPORT_GUIDANCE, file_kind, supported_file_extensions
 from example.model_picker import PREMIUM_MESSAGE, ModelPicker
 from example.store import Chat, Store, Turn
 from example.theme import DARK, LIGHT, icon, stylesheet

@@ -7,6 +7,7 @@ jobs:
   python:
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
         python: ['3.11', '3.12', '3.13']
     steps:
@@ -36,6 +37,7 @@ jobs:
     env:
       DUCKAI_TEST_BROWSER: "1"
     strategy:
+      fail-fast: false
       matrix:
         runtime: [node22, node24, bun, deno]
     steps:
@@ -51,7 +53,7 @@ jobs:
         with:
           deno-version: v2.x
       - run: npm ci
-      - run: npx playwright install --with-deps chromium --no-shell
+      - run: npm exec --workspace @rendertk/duckai-sdk -- playwright install --with-deps chromium --no-shell
       - run: npm run build && npm run check
       - run: npm test
         if: startsWith(matrix.runtime, 'node')

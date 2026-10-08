@@ -3,8 +3,9 @@
 import asyncio
 from copy import deepcopy
 
-from duckai import AsyncDuckAI, AttachmentError, ChallengeError, RateLimitError, get_model
 from PySide6.QtCore import QThread, Signal
+
+from duckai import AsyncDuckAI, AttachmentError, ChallengeError, RateLimitError, get_model
 
 
 def friendly_error(error: Exception) -> str:

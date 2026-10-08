@@ -27,6 +27,8 @@ Chromium is installed automatically on the first chat if missing. For servers or
 
 ```sh
 npx playwright install chromium --no-shell
+# Inside this monorepo, resolve the SDK workspace's CLI instead:
+npm exec --workspace @rendertk/duckai-sdk -- playwright install chromium --no-shell
 # Linux hosts may additionally need: npx playwright install-deps chromium
 ```
 

@@ -7,13 +7,14 @@ pytest.importorskip("PySide6")
 pytest.importorskip("markdown_it")
 pytest.importorskip("pygments")
 
-from example.code_view import CodeBlock  # noqa: E402
-from example.theme import DARK, LIGHT, stylesheet  # noqa: E402
-from example.widgets import MarkdownText, MarkdownView, reply_segments  # noqa: E402
 from PySide6.QtCore import Qt, QUrl  # noqa: E402
 from PySide6.QtGui import QTextTable  # noqa: E402
 from PySide6.QtTest import QTest  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
+
+from example.code_view import CodeBlock  # noqa: E402
+from example.theme import DARK, LIGHT, stylesheet  # noqa: E402
+from example.widgets import MarkdownText, MarkdownView, reply_segments  # noqa: E402
 
 
 @pytest.fixture
