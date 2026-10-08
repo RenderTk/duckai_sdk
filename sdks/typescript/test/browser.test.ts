@@ -34,26 +34,48 @@ test(
       "--no-first-run",
       "about:blank",
     ];
-    if (process.getuid?.() === 0) args.unshift("--no-sandbox");
+    // Ubuntu CI runners restrict unprivileged user namespaces for downloaded Chromium.
+    // This exception is only for the isolated synthetic-page test browser.
+    if (
+      process.getuid?.() === 0 ||
+      (process.platform === "linux" && process.env.CI === "true")
+    )
+      args.unshift("--no-sandbox");
     const child = spawn(chromium.executablePath(), args, {
-      stdio: "ignore",
+      stdio: ["ignore", "ignore", "pipe"],
       detached: process.platform !== "win32",
       windowsHide: true,
+    });
+    let startupLog = "";
+    let startupError: Error | undefined;
+    child.stderr?.on("data", (chunk: Buffer) => {
+      startupLog = (startupLog + chunk.toString()).slice(-8192);
+    });
+    child.once("error", (error) => {
+      startupError = error;
     });
     let browser;
     let ai: DuckAI | undefined;
     try {
       const endpoint = `http://127.0.0.1:${port}`;
-      for (let i = 0; i < 100; i++) {
+      let ready = false;
+      for (let i = 0; i < 300; i++) {
+        if (startupError) throw startupError;
+        if (child.exitCode !== null || child.signalCode !== null)
+          throw new Error(`Test Chromium exited during startup: ${startupLog}`);
         try {
           const response = await fetch(`${endpoint}/json/version`);
           await response.body?.cancel();
-          if (response.ok) break;
+          if (response.ok) {
+            ready = true;
+            break;
+          }
         } catch {
           /* Startup. */
         }
         await new Promise((resolve) => setTimeout(resolve, 50));
       }
+      assert.ok(ready, `Test Chromium did not become ready: ${startupLog}`);
       browser = await chromium.connectOverCDP(endpoint);
       const context = browser.contexts()[0]!;
       const userPage = await context.newPage();
@@ -115,7 +137,7 @@ test(
         await session.send("Browser.close").catch(() => {});
       }
       await browser?.close();
-      if (child.exitCode === null && child.signalCode === null) {
+      if (child.pid && child.exitCode === null && child.signalCode === null) {
         const exited = new Promise<void>((resolve) =>
           child.once("exit", () => resolve()),
         );

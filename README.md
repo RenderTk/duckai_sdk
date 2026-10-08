@@ -58,7 +58,7 @@ See the [JavaScript SDK guide](sdks/typescript/README.md) for installing a packe
 
 ## Sessions, models and files
 
-The first request starts isolated headless Chromium to obtain fresh Duck.ai challenge headers. It does not open a browser window. Chromium is downloaded automatically if missing; preinstall it with `npx playwright install chromium --no-shell` for predictable deployment. Always close the client to release its browser and streams.
+The first request starts isolated headless Chromium to obtain fresh Duck.ai challenge headers. It does not open a browser window. Chromium is downloaded automatically if missing; use the Chromium installation commands in the language-specific SDK guides for predictable deployment. Always close the client to release its browser and streams.
 
 Both SDKs expose the same versioned [model catalogue](protocol/models.json), including free and subscriber model metadata. Subscriber models require Duck.ai account entitlement; automatic anonymous sessions do not grant premium access. Custom model IDs remain usable when the upstream catalogue changes.
 
