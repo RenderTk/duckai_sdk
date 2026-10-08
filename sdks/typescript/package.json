@@ -1,0 +1,67 @@
+{
+  "name": "@rendertk/duckai-sdk",
+  "version": "0.2.0",
+  "description": "Direct Duck.ai SDK for TypeScript and JavaScript, with silent anonymous sessions, streaming and attachments",
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      }
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/RenderTk/duckai_sdk.git",
+    "directory": "sdks/typescript"
+  },
+  "scripts": {
+    "build": "tsup",
+    "check": "tsc --noEmit",
+    "test": "node --import tsx --test test/*.test.ts",
+    "prepack": "npm run build"
+  },
+  "dependencies": {
+    "@kenjiuno/msgreader": "^1.27.0",
+    "fast-xml-parser": "^5.0.0",
+    "html-to-text": "^9.0.5",
+    "iconv-lite": "^0.7.0",
+    "mailparser": "^3.7.0",
+    "pdf-lib": "^1.17.1",
+    "pdf-parse": "^2.4.0",
+    "playwright": "~1.63.0",
+    "sharp": "^0.35.5",
+    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz",
+    "yauzl": "^3.2.0"
+  },
+  "devDependencies": {
+    "@hono/node-server": "^2.1.4",
+    "@types/html-to-text": "^9.0.4",
+    "@types/mailparser": "^3.4.6",
+    "@types/node": "^22.0.0",
+    "@types/yauzl": "^2.10.3",
+    "bun": "^1.4.2",
+    "deno": "^2.9.6",
+    "hono": "^4.13.13",
+    "prettier": "^3.9.9",
+    "tsup": "^8.5.0",
+    "tsx": "^4.20.0",
+    "typescript": "^5.9.0"
+  }
+}

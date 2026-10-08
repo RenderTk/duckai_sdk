@@ -1,43 +1,6 @@
-[build-system]
-requires = ["setuptools>=75"]
-build-backend = "setuptools.build_meta"
-
-[project]
-name = "duckai-sdk"
-version = "0.2.0"
-description = "Direct Python SDK for Duck.ai with automatic anonymous sessions, streaming, and attachments"
-readme = "README.md"
-requires-python = ">=3.11"
-dependencies = [
-  "httpx>=0.28,<1",
-  "playwright>=1.50,<2",
-  "pillow>=11,<13",
-  "pypdf>=5,<7",
-  "defusedxml>=0.7,<1",
-  "python-calamine>=0.8,<1",
-  "striprtf>=0.0.29,<1",
-  "olefile>=0.47,<1",
-  "pydantic>=2.7,<3",
-  "pydantic-settings>=2.7,<3",
-]
-
-[project.urls]
-Repository = "https://github.com/RenderTk/duckai_sdk"
-
-[project.optional-dependencies]
-dev = ["pytest>=8,<10", "ruff>=0.9,<1"]
-desktop = ["PySide6>=6.8,<7", "Pygments>=2.18,<3", "markdown-it-py>=3,<5"]
-
-[tool.setuptools.packages.find]
-include = ["duckai", "duckai.*"]
-exclude = ["example", "example.*", "examples", "examples.*", "tests", "tests.*"]
-
-[tool.setuptools.package-data]
-duckai = ["py.typed"]
-
 [tool.pytest.ini_options]
-testpaths = ["tests"]
-pythonpath = ["."]
+testpaths = ["sdks/python/tests"]
+pythonpath = ["sdks/python", "."]
 
 [tool.ruff]
 target-version = "py311"

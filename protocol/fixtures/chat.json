@@ -1,0 +1,25 @@
+{
+  "model": "mistral-small-2603",
+  "prompt": "Explain recursion",
+  "request": {
+    "model": "mistral-small-2603",
+    "messages": [
+      {
+        "role": "user",
+        "content": "Explain recursion"
+      }
+    ],
+    "canUseTools": false,
+    "reasoningEffort": "none",
+    "canShowGreeting": false
+  },
+  "sse": "event: message\r\ndata: {\"message\":\"Hello \"}\r\n\r\ndata: {\"message\":\"world \u2603\"}\n\ndata: {\"parts\":[{\"type\":\"reasoning\",\"id\":\"r1\",\"encryptedText\":\"opaque\"}]}\n\ndata: [DONE]\n\n",
+  "text": "Hello world \u2603",
+  "parts": [
+    {
+      "type": "reasoning",
+      "id": "r1",
+      "encryptedText": "opaque"
+    }
+  ]
+}

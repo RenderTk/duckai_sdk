@@ -1,0 +1,62 @@
+name: SDK checks
+on:
+  push:
+  pull_request:
+
+jobs:
+  python:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python: ['3.11', '3.12', '3.13']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - run: python -m pip install -e './sdks/python[dev]' build
+      - run: python scripts/sync_protocol.py --check
+      - run: ruff check .
+      - run: python -m pytest
+      - run: python -m build sdks/python --outdir output/python-dist
+  desktop:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: sudo apt-get update && sudo apt-get install -y libegl1 libopengl0
+      - run: python -m pip install -e './sdks/python[dev,desktop]'
+      - run: python -m pytest
+        env:
+          QT_QPA_PLATFORM: offscreen
+  javascript:
+    runs-on: ubuntu-latest
+    env:
+      DUCKAI_TEST_BROWSER: "1"
+    strategy:
+      matrix:
+        runtime: [node22, node24, bun, deno]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.runtime == 'node24' && '24' || '22' }}
+          cache: npm
+      - uses: oven-sh/setup-bun@v2
+        if: matrix.runtime == 'bun'
+      - uses: denoland/setup-deno@v2
+        if: matrix.runtime == 'deno'
+        with:
+          deno-version: v2.x
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium --no-shell
+      - run: npm run build && npm run check
+      - run: npm test
+        if: startsWith(matrix.runtime, 'node')
+      - run: bun test sdks/typescript/test/*.test.ts
+        if: matrix.runtime == 'bun'
+      - run: deno test -A --node-modules-dir=manual sdks/typescript/test/*.test.ts
+        if: matrix.runtime == 'deno'
+      - run: mkdir -p output && npm pack --workspace @rendertk/duckai-sdk --pack-destination ./output

@@ -1,366 +1,105 @@
-# Duck.ai Python SDK
+# Duck.ai SDKs
 
-Talk to [Duck.ai](https://duck.ai/) directly from Python. The SDK handles anonymous
-sessions, browser challenges, request headers, streaming, conversation history,
-and document/PDF/image attachments. You don't need to start a FastAPI server or copy tokens
-from your browser.
+Native SDKs for calling Duck.ai directly, with silent anonymous sessions, streaming, conversations, model selection and file attachments.
 
-## Install
+| SDK | Supported environments | Documentation |
+| --- | --- | --- |
+| Python | Python 3.11+ | [Python SDK](sdks/python/README.md) |
+| TypeScript / JavaScript | Node.js 22.13+, Bun 1.4+, Deno 2.9+; ESM and CommonJS | [TypeScript / JavaScript SDK](sdks/typescript/README.md) |
 
-Requires Python 3.11 or newer.
+The JavaScript SDK runs natively in each runtime. Hono integration includes Server-Sent Events and cancellation when a client disconnects. Browser pages, Cloudflare Workers and other runtimes without subprocesses and native Node-compatible dependencies are not supported: automatic anonymous sessions need Chromium, and image processing uses Sharp.
+
+## Python
+
+Install the SDK from this repository:
 
 ```sh
-python -m pip install "git+https://github.com/RenderTk/duckai_sdk.git"
+python -m pip install 'git+https://github.com/RenderTk/duckai_sdk.git#subdirectory=sdks/python'
 ```
 
-Or install your local checkout:
+```python
+from duckai import DuckAI, Model
+
+with DuckAI(model=Model.GPT_6_LUNA) as ai:
+    chat = ai.conversation()
+    print(chat.chat("Explain recursion with a short example.").text)
+    print(chat.chat("Now make the example simpler.").text)
+```
+
+Async APIs, attachments and configuration are documented in [sdks/python](sdks/python/README.md).
+
+## TypeScript / JavaScript
+
+The npm package is prepared for distribution but has not been published to npm. Build it from this checkout:
 
 ```sh
 git clone https://github.com/RenderTk/duckai_sdk.git
 cd duckai_sdk
-python -m pip install -e .
+npm ci
+npm run build
+node sdks/typescript/examples/chat.mjs
 ```
 
-Normal installs provide only the `duckai` SDK and its dependencies. The desktop
-chat app stays in this repository under `example/`; it is excluded from wheels and
-source distributions. PySide6 is installed only if you explicitly select the
-`desktop` extra. Importing or installing the SDK never starts the desktop app.
+```typescript
+import { DuckAI, Model } from "@rendertk/duckai-sdk";
 
-The SDK downloads its matching Chromium build on the first request if it is not
-already cached, then runs it headlessly. No browser window, display, Xvfb, API key,
-or copied browser token is required. The first run can take longer while downloading
-the browser; later clients reuse the cache. To preinstall it for an offline build or
-deployment, run `python -m playwright install chromium --no-shell`.
-
-On Linux, Chromium's OS libraries must be installed in the environment. You can
-install them with `python -m playwright install --with-deps chromium --no-shell`.
-The SDK does not change system packages or request administrator permissions.
-
-## Your first chat
-
-```python
-from duckai import DuckAI
-
-with DuckAI() as ai:
-    response = ai.chat("Explain recursion with a simple example.")
-    print(response.text)
+const ai = new DuckAI({ model: Model.GPT_6_LUNA });
+try {
+  const chat = ai.conversation();
+  for await (const delta of chat.stream("Explain recursion.")) {
+    process.stdout.write(delta);
+  }
+} finally {
+  await ai.close();
+}
 ```
 
-`with` closes the HTTP session, streams, temporary browser, and browser profile
-when you finish. Keep one client open across requests so its browser can be reused.
-The browser starts only when the first request needs an anonymous token.
+See the [JavaScript SDK guide](sdks/typescript/README.md) for installing a packed SDK into another project, Bun and Deno commands, and the [Hono server example](sdks/typescript/examples/hono-server.ts).
 
-## Choosing a model
+## Sessions, models and files
 
-Use `Model` constants or a Duck.ai wire ID with either client, including per-request
-overrides. The SDK chooses the model's default reasoning effort and tool support.
+The first request starts isolated headless Chromium to obtain fresh Duck.ai challenge headers. It does not open a browser window. Chromium is downloaded automatically if missing; preinstall it with `npx playwright install chromium --no-shell` for predictable deployment. Always close the client to release its browser and streams.
 
-```python
-from duckai import DuckAI, Model, list_models
+Both SDKs expose the same versioned [model catalogue](protocol/models.json), including free and subscriber model metadata. Subscriber models require Duck.ai account entitlement; automatic anonymous sessions do not grant premium access. Custom model IDs remain usable when the upstream catalogue changes.
 
-for model in list_models(include_subscriber=False):
-    print(model.id, model.name, model.supports_images, model.supports_pdf)
+PDFs and images use native model attachments where supported. Office and Google suite **exported files** are extracted locally into labelled text. Legacy conversion can use an optional installed LibreOffice. See [file formats and limitations](docs/file-formats.md). Cloud document URLs and Drive authentication are outside the SDK's scope.
 
-with DuckAI(model=Model.CLAUDE_HAIKU_4_5) as ai:
-    print(ai.chat("Help me draft a friendly introduction.").text)
-    print(ai.chat("Explain this concept.", model=Model.MISTRAL_SMALL_4).text)
+Duck.ai remains the upstream service. Its challenge format, model access, rate limits and endpoints can change. Errors are surfaced with their upstream status; the SDK does not silently retry or provide offline responses.
+
+## Repository layout
+
+```text
+sdks/
+  python/          # Independent Python package, tests and examples
+  typescript/      # Independent npm package, tests and examples
+protocol/          # Shared model metadata and wire/attachment fixtures
+scripts/           # Shared catalogue generation and consistency checks
+docs/              # Cross-language behavior and contribution guides
+example/           # Optional native Python desktop chat project
 ```
 
-`list_models()` and `ai.list_models()` return an immutable catalogue without
-network access. `get_model(id)` returns its metadata or `None` for an unknown ID.
-The catalogue was verified against Duck.ai's live frontend on October 7, 2026:
-
-| Model | Wire ID | Access | Attachments |
-| --- | --- | --- | --- |
-| GPT-6 Luna | `gpt-6-luna` | Free | Images, PDFs |
-| GPT-5.4 mini | `gpt-5.4-mini` | Free | Images, PDFs |
-| Claude Haiku 4.5 | `claude-haiku-4-5` | Free | Images, PDFs |
-| Mistral Small 4 | `mistral-small-2603` | Free | Text only |
-| gpt-oss 120B | `tinfoil/gpt-oss-120b` | Free | Text only |
-| Gemma 4 31B (beta) | `tinfoil/gemma4-31b` | Free | Images |
-| GPT-5.6 Terra | `gpt-5.6-terra` | Plus | Images, PDFs |
-| Claude Sonnet 4.6 | `claude-sonnet-4-6` | Plus | Images, PDFs |
-| GPT-5.6 Sol | `gpt-5.6-sol` | Pro | Images, PDFs |
-| Claude Opus 4.8 | `claude-opus-4-8` | Pro | Images, PDFs |
-
-The SDK creates anonymous sessions by default. Listing or selecting a subscription
-model does not grant access: Duck.ai enforces the session's entitlement. This SDK
-does not implement subscription login. The desktop example enables the six free
-models and displays subscription models as unavailable in its anonymous session.
-Voice and image-generation services use separate protocols and are not chat models
-in this catalogue.
-
-Unknown and future model IDs still pass through to Duck.ai. For known models,
-explicit reasoning efforts must appear in `model.reasoning_efforts`; gpt-oss defaults
-to `low`, Mistral to `none`. Use `ai.attachment_limits(model)` for attachment rules.
-
-## Follow-up questions
-
-Use a conversation when you want the model to remember previous turns:
-
-```python
-from duckai import DuckAI
-
-with DuckAI() as ai:
-    chat = ai.conversation()
-    print(chat.chat("My project's name is Later. Remember it.").text)
-    print(chat.chat("What is my project's name?").text)
-
-    history = chat.messages  # a copy you can save as JSON
-```
-
-Each conversation has independent history. A turn is saved only after a complete
-reply. Failed requests and streams you stop early leave the previous history intact.
-`chat.clear()` starts over. To restore history, use
-`ai.conversation(messages=saved_history)`.
-
-`ai.chat(...)` is a single request. To supply history yourself, use
-`ai.chat("Follow up", messages=history)` or `ai.chat(messages=history)`.
-
-## Streaming
-
-```python
-from duckai import DuckAI
-
-with DuckAI() as ai:
-    with ai.stream("Write a short story about a lost robot.") as stream:
-        for chunk in stream:
-            print(chunk, end="", flush=True)
-    print()
-    print("Complete:", stream.response.done)
-```
-
-Chunks arrive as text becomes available. The stream context manager also closes
-the upstream connection if you break out of the loop. For a conversation, use
-`with chat.stream("Follow up") as stream:` in the same way.
-
-## Documents, PDFs and images
-
-Pass file paths in `files`:
-
-```python
-from pathlib import Path
-from duckai import DuckAI
-
-with DuckAI() as ai:
-    chat = ai.conversation()
-    answer = chat.chat(
-        "Summarize the PDF and explain the screenshot.",
-        files=[Path("document.pdf"), Path("screenshot.png")],
-    )
-    print(answer.text)
-    print(chat.chat("What are the three main points?").text)
-```
-
-For files already in memory:
-
-```python
-from duckai import Attachment, DuckAI
-
-with open("document.pdf", "rb") as file:
-    document = Attachment.from_bytes(file.read(), filename="document.pdf")
-
-with DuckAI() as ai:
-    print(ai.chat("Summarize this document.", files=[document]).text)
-```
-
-Images are decoded, oriented, resized, and converted to WebP. PDF bytes are
-preserved and encoded in Duck.ai's native attachment format. The SDK checks files
-and conversation limits before sending a request.
-
-The observed anonymous limits for the default model are:
-
-- PDF: up to 3 per conversation, 15 pages per file, 5 MiB combined.
-- Images: PNG, JPEG, WebP, or GIF; up to 3 per message and 5 per conversation.
-- Text in a message containing images: up to 4,500 characters.
-
-`ai.attachment_limits()` returns the configured limits. `ai.prepare_files([...])`
-returns native or extracted text parts without making a network request, useful when you
-manage your own message history. Prepared PDFs/images still count toward the limits
-when included in later messages.
-
-Word, Excel, PowerPoint, OpenDocument and downloaded Google Workspace exports
-use the same `files` argument. They are read locally and sent to Duck.ai as
-filename-labeled text, including on text-only models:
-
-```python
-from duckai import DuckAI, Model, supported_file_extensions
-
-with DuckAI(model=Model.MISTRAL_SMALL_4) as ai:
-    result = ai.chat(
-        "Compare the report, budget and presentation.",
-        files=["report.docx", "budget.xlsx", "briefing.pptx"],
-    )
-    print(result.text)
-    print(ai.attachment_limits())
-
-print(supported_file_extensions())
-```
-
-Readers are included in the standard SDK installation. Legacy Word/PowerPoint,
-Publisher and binary Visio files additionally need LibreOffice for silent local
-conversion. Documents default to 20 MiB per file and 16,000 extracted characters
-per message **including the prompt and filename labels** (4,500 when combined
-with images). Oversized content is rejected with instructions to attach a smaller
-section; it is not silently cut off. Set lower limits through `Settings` or the
-environment. Extraction preserves text, tables, spreadsheet values and OOXML
-formula source, and presentation speaker notes; it does not upload the original
-Office file, render its layout, read embedded images, or recalculate formulas.
-
-See [the file format guide](docs/file-formats.md) for every supported extension,
-conversion setup, and export guidance for OneNote, Access, Project, Outlook
-archives and Google shortcut files. Google Drive access is not required.
-
-## Async applications
-
-```python
-import asyncio
-from duckai import AsyncDuckAI
-
-async def main():
-    async with AsyncDuckAI() as ai:
-        response = await ai.chat("Say hello in Spanish.")
-        print(response.text)
-
-        async with ai.stream("Count from one to five.") as stream:
-            async for chunk in stream:
-                print(chunk, end="", flush=True)
-        print()
-
-asyncio.run(main())
-```
-
-Async conversations have the same interface, with `await chat.chat(...)` and
-`async with chat.stream(...)`. Use `AsyncDuckAI` within a running event loop,
-including async web applications and notebooks. The sync `DuckAI` client should
-be used in the thread that created it. Both clients can be closed explicitly with
-`ai.close()` or `await ai.aclose()` if you don't use a context manager.
-
-## Models and options
-
-The default model is `gpt-6-luna`. Duck.ai controls which models are available to an
-anonymous session.
-
-```python
-from duckai import DuckAI
-
-with DuckAI(model="gpt-6-luna", timeout=120) as ai:
-    response = ai.chat(
-        "Explain what an HTTP request is.",
-        reasoning_effort="none",
-        can_use_tools=True,
-    )
-    print(response.text)
-```
-
-Pass `model=...` to a particular chat or conversation to override the client
-default. Python option names such as `reasoning_effort`, `can_use_tools`, and
-`durable_stream` are translated to Duck.ai's native names. Native option names and
-additional fields are also accepted. Supply only one spelling of a given option.
-
-`response.text` is the reply, `response.done` indicates the completion marker,
-`response.events` contains original parsed stream events, and
-`response.assistant_message` is reusable in message history. Opaque reasoning and
-tool fields in supplied historical messages are preserved.
-
-For raw parsed events, use `with ai.events("Hello") as stream:` and iterate over
-the stream. Its `response` still collects text and completion state. Async clients
-and conversations also provide `events()`.
-
-## How it works
-
-On your first chat, the SDK starts an isolated headless Chromium session. It reads Duck.ai's
-current frontend version and the browser's actual user agent, bootstraps an anonymous
-session, and fetches a fresh browser challenge. Chromium evaluates the challenge
-inside Duck.ai's own page; the SDK hashes the returned client values and constructs
-the headers needed for the chat request.
-
-The Python HTTP client then posts directly to
-`https://duck.ai/duckchat/v1/chat` and decodes its event stream. Follow-up requests
-reuse the browser while obtaining fresh challenges. There is no local API server
-between your code and Duck.ai. No HAR file, account, or captured token is needed at
-runtime. Prompts and attached files are sent to Duck.ai.
-
-**Chromium runs silently by default.** The SDK manages a full Chromium process in
-unified headless mode with a temporary profile, performs the challenge, and closes
-it when the client closes. It configures the headless page's identity from the
-running browser's actual platform/version. No visible-browser fallback happens
-when Duck.ai rejects a request. Use `DuckAI(headless=False)` only when you explicitly
-want a browser window for debugging.
-
-Automatic browser installation has its own timeout (300 seconds by default),
-separate from challenge generation and chat response timeouts. It happens only
-when the bundled browser is missing. Disable it with
-`DuckAI(browser_auto_install=False)` in environments where dependencies are
-provisioned ahead of time. A supplied executable or CDP endpoint is always used
-without downloading a replacement.
-
-You can select an installed Chromium executable with
-`DuckAI(browser_executable="/absolute/path/to/chromium")`, or attach to an existing
-local Chromium debugging session with
-`DuckAI(browser_cdp_url="http://127.0.0.1:9222")`. The SDK closes its own tab but
-keeps an externally managed browser running.
-
-Configuration also reads `DUCKAI_*` environment variables and an optional `.env`
-file. See [.env.example](.env.example). Constructor options override these values.
-For advanced settings, pass a `duckai.Settings` instance; set `_env_file=None` when
-you want to ignore `.env`.
-
-## Errors
-
-```python
-from duckai import DuckAI, DuckAIError, RateLimitError
-
-try:
-    with DuckAI() as ai:
-        print(ai.chat("Hello").text)
-except RateLimitError as error:
-    print("Rate limited. Retry-After:", error.retry_after)
-except DuckAIError as error:
-    print("Request failed:", error.status_code, error.detail)
-```
-
-Errors include `AttachmentError`, `ChallengeError`, `RateLimitError`, and
-`IncompleteResponseError`, all subclasses of `DuckAIError`. An incomplete response
-exposes partial output as `error.response`. Local file-system failures raise normal
-Python file errors; invalid arguments may raise `ValueError`, `TypeError`, or a
-Pydantic validation error.
-
-Rate limits and challenge rejections are propagated without automatic retries.
-This is an unofficial client for Duck.ai's web endpoint, so upstream behavior and
-availability can change.
-
-## Repository desktop example
-
-For a complete native desktop chat application, see [Duck.ai Desktop](example/README.md).
-Clone this repository, install with `python -m pip install -e '.[desktop]'`, then run
-`python -m example` from the repository root. It includes streaming, saved
-conversations, Markdown, attachments, themes, and conversation import/export.
-The app is an optional example of using the SDK; normal SDK installs do not include it.
-
-## Development and verification
+The desktop chat app is a built-in example project. SDK installation does not include or launch it, and JavaScript consumers do not need Python or Qt. To run it from a checkout:
 
 ```sh
-python -m pip install -e '.[dev]'
-python -m pytest -q
-python -m ruff check duckai tests scripts examples example
+python -m pip install -e './sdks/python[desktop]'
+python -m example
 ```
 
-Unit tests cover direct requests, anonymous-token refresh, synchronous and
-asynchronous streams, native attachments, history isolation, interrupted replies,
-headless startup, automatic browser setup, rate limits, cancellation, and resource
-cleanup. They do not need Chromium or a
-live Duck.ai connection.
+See [example/README.md](example/README.md) for desktop features and setup.
 
-To run live semantic checks with synthetic PDFs and images:
+## Development
 
 ```sh
-python scripts/verify_live.py --interval 30
+python -m pip install -e './sdks/python[dev,desktop]'
+npm ci
+python scripts/sync_protocol.py --check
+python -m pytest
+ruff check .
+npm run build
+npm run check
+npm test
+npm run test:bun
+npm run test:deno
 ```
 
-This makes six chat requests and writes an ignored report in `output/`. Duck.ai
-may rate-limit a burst of requests. To run a particular check after a cooldown:
-
-```sh
-python scripts/verify_live.py --checks async_stream --output output/async-stream.json
-```
+Tests use deterministic transport fixtures, not an offline chat mode in the SDK. Live checks are separate and require Duck.ai network access. [Adding another language SDK](docs/adding-sdk.md) explains package boundaries and contract requirements.

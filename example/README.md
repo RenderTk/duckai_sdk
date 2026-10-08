@@ -15,7 +15,7 @@ From the repository root, with Python 3.11 or newer:
 ```sh
 python -m venv .venv
 source .venv/bin/activate
-python -m pip install -e '.[desktop]'
+python -m pip install -e './sdks/python[desktop]'
 python -m example
 ```
 
@@ -160,9 +160,9 @@ Connection for debugging; that choice persists.
 Run the SDK and desktop tests:
 
 ```sh
-python -m pip install -e '.[desktop,dev]'
+python -m pip install -e './sdks/python[desktop,dev]'
 python -m pytest -q
-python -m ruff check duckai tests scripts examples example
+python -m ruff check sdks/python example scripts
 ```
 
 Desktop integration tests use the actual SDK with a controlled HTTP transport to

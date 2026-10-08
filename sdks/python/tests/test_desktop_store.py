@@ -4,7 +4,6 @@ import json
 from dataclasses import asdict
 
 import pytest
-
 from example.store import Chat, Store, Turn, decode_chat
 
 

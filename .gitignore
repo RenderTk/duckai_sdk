@@ -9,3 +9,5 @@ build/
 dist/
 .playwright-cli/
 output/
+node_modules/
+*.tgz

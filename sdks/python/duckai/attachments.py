@@ -15,7 +15,7 @@ from PIL import Image, ImageOps, UnidentifiedImageError
 from pypdf import PdfReader
 from pypdf.errors import PyPdfError
 
-from duckai.catalog import get_model
+from duckai.catalog import NATIVE_PROFILES, get_model
 from duckai.config import Settings
 from duckai.documents import DOCUMENT_PREFIX, prepare_document, supported_file_extensions
 from duckai.errors import AttachmentError
@@ -37,16 +37,7 @@ class AttachmentProfile:
 
 # From entry.duckai.907f8c15e2149c6a12ec.js on October 6, 2026. Limits
 # here are the anonymous/FREE tier; account-tier limits do not apply to this API.
-PROFILES = {
-    "gpt-6-luna": AttachmentProfile(),
-    "gpt-5.4-mini": AttachmentProfile(),
-    "claude-haiku-4-5": AttachmentProfile(),
-    "gpt-5.6-terra": AttachmentProfile(1024, 3, 10),
-    "gpt-5.6-sol": AttachmentProfile(1024, 3, 10),
-    "claude-sonnet-4-6": AttachmentProfile(1024, 3, 10),
-    "claude-opus-4-8": AttachmentProfile(1024, 3, 10),
-    "tinfoil/gemma4-31b": AttachmentProfile(supports_pdf=False),
-}
+PROFILES = {model: AttachmentProfile(**profile) for model, profile in NATIVE_PROFILES.items()}
 
 
 def fail(status: int, code: str, message: str):

@@ -17,15 +17,15 @@ from PIL import Image
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 pytest.importorskip("PySide6")
 
+from example.app import MainWindow, SettingsDialog  # noqa: E402
+from example.store import Store  # noqa: E402
+from example.worker import ChatWorker  # noqa: E402
 from PySide6.QtCore import Qt  # noqa: E402
 from PySide6.QtGui import QFont  # noqa: E402
 from PySide6.QtTest import QTest  # noqa: E402
 from PySide6.QtWidgets import QApplication, QLabel  # noqa: E402
 
 from duckai import AsyncDuckAI, Model, Settings, list_models  # noqa: E402  # noqa: E402
-from example.app import MainWindow, SettingsDialog  # noqa: E402
-from example.store import Store  # noqa: E402
-from example.worker import ChatWorker  # noqa: E402
 
 
 def wait_for(condition, timeout=5):

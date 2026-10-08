@@ -1,0 +1,16 @@
+{
+  "name": "duckai-sdks",
+  "private": true,
+  "workspaces": [
+    "sdks/typescript"
+  ],
+  "scripts": {
+    "build": "npm run build --workspace @rendertk/duckai-sdk",
+    "check": "npm run check --workspace @rendertk/duckai-sdk",
+    "test": "npm run test --workspace @rendertk/duckai-sdk",
+    "test:python": "python -m pytest",
+    "protocol:check": "python scripts/sync_protocol.py --check",
+    "test:bun": "bun test sdks/typescript/test/*.test.ts",
+    "test:deno": "deno test -A --node-modules-dir=manual sdks/typescript/test/*.test.ts"
+  }
+}

@@ -1,2 +1,2 @@
 # Run from the repository root: python -m pip install -r example/requirements.txt
--e .[desktop]
+-e ./sdks/python[desktop]
