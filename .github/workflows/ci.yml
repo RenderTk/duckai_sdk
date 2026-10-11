@@ -62,3 +62,52 @@ jobs:
       - run: deno test -A --node-modules-dir=manual sdks/typescript/test/*.test.ts
         if: matrix.runtime == 'deno'
       - run: mkdir -p output && npm pack --workspace @rendertk/duckai-sdk --pack-destination ./output
+  csharp:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - run: dotnet test sdks/csharp/DuckAI.Tests/DuckAI.Tests.csproj -c Release
+      - run: dotnet pack sdks/csharp/DuckAI/DuckAI.csproj -c Release -o output/nuget
+  swift:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: swift test --package-path sdks/swift
+      - run: xcodebuild -project sdks/swift/Examples/DuckAIExample.xcodeproj -scheme DuckAIExample -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' build CODE_SIGNING_ALLOWED=NO
+      - run: xcodebuild -project sdks/swift/Examples/DuckAIExample.xcodeproj -scheme DuckAIMacExample -destination 'platform=macOS' build CODE_SIGNING_ALLOWED=NO
+  flutter:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - uses: actions/setup-java@v4
+        if: runner.os == 'Linux'
+        with:
+          distribution: temurin
+          java-version: '17'
+      - run: flutter pub get
+        working-directory: sdks/dart
+      - run: flutter analyze && flutter test
+        working-directory: sdks/dart
+      - run: flutter config --jdk-dir "$JAVA_HOME"
+        if: runner.os == 'Linux'
+      - run: flutter build apk --debug
+        if: runner.os == 'Linux'
+        working-directory: sdks/dart/example
+      - run: flutter build ios --simulator --config-only && cd ios && pod install && xcodebuild -workspace Runner.xcworkspace -scheme Runner -sdk iphonesimulator -configuration Debug ARCHS=arm64 ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO build
+        if: runner.os == 'macOS'
+        working-directory: sdks/dart/example

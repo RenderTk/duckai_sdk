@@ -11,3 +11,16 @@ dist/
 output/
 node_modules/
 *.tgz
+.build/
+.swiftpm/
+.dart_tool/
+.flutter-plugins-dependencies
+Pods/
+*.xcuserstate
+xcuserdata/
+bin/
+obj/
+*.nupkg
+*.snupkg
+sdks/dart/pubspec.lock
+sdks/dart/.metadata

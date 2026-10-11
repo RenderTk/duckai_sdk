@@ -1,6 +1,6 @@
 # Attachment format guide
 
-Both SDK clients (`DuckAI` / `AsyncDuckAI`) and the native example app accept the
+The Python and JavaScript SDKs and the native Python example app accept the
 formats below through the existing `files` argument. Use paths or
 `Attachment.from_bytes(data, filename="report.docx")`. The extension selects the
 local document reader, so supply the real filename for in-memory files.
@@ -8,6 +8,16 @@ local document reader, so supply the real filename for in-memory files.
 Office and Workspace exports become labeled text content. They work on all chat
 models, including models without native image/PDF support. PDFs and images keep
 Duck.ai's existing binary attachment protocol and model-specific limits.
+
+## Native C#, Swift and Dart packages
+
+The three new native packages share modern exported document readers and native PDF/image attachment behavior. They do not invoke the Python/JavaScript readers or a remote conversion service. The comprehensive reader table below describes Python/JavaScript; for the new packages, consult their `supportedFileExtensions` catalogue and package guide:
+
+- [C# guide](../sdks/csharp/README.md)
+- [Swift guide](../sdks/swift/README.md)
+- [Dart guide](../sdks/dart/README.md)
+
+Modern OOXML Office, OpenDocument, exported text/HTML/XML/SVG and exported web archives are supported locally. Legacy binary Office, XLS/XLSB, MSG/OFT and optional LibreOffice conversions require a modern export in these packages. Native images are encoded as PNG in the new packages and WebP in Python/JavaScript; both use the same upstream image-part protocol and model limits. Swift uses ImageIO/PDFKit, C# uses SkiaSharp/PdfPig, and Flutter uses native PDF validation and Dart image decoding.
 
 ## Included local readers
 

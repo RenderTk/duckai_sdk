@@ -1,0 +1,214 @@
+[
+  {
+    "constant": "GPT_6_LUNA",
+    "id": "gpt-6-luna",
+    "name": "GPT-6 Luna",
+    "provider": "OpenAI",
+    "description": "For everyday questions and ideas",
+    "access_tier": "free",
+    "reasoning_efforts": [
+      "none",
+      "low"
+    ],
+    "supports_images": true,
+    "supports_pdf": true,
+    "supports_tools": true,
+    "beta": false,
+    "attachment_profile": {
+      "max_dimension": 512,
+      "images_per_message": 3,
+      "images_per_conversation": 5,
+      "supports_pdf": true
+    }
+  },
+  {
+    "constant": "GPT_5_4_MINI",
+    "id": "gpt-5.4-mini",
+    "name": "GPT-5.4 mini",
+    "provider": "OpenAI",
+    "description": "A compact reasoning model",
+    "access_tier": "free",
+    "reasoning_efforts": [
+      "none",
+      "low",
+      "medium"
+    ],
+    "supports_images": true,
+    "supports_pdf": true,
+    "supports_tools": true,
+    "beta": false,
+    "attachment_profile": {
+      "max_dimension": 512,
+      "images_per_message": 3,
+      "images_per_conversation": 5,
+      "supports_pdf": true
+    }
+  },
+  {
+    "constant": "CLAUDE_HAIKU_4_5",
+    "id": "claude-haiku-4-5",
+    "name": "Claude Haiku 4.5",
+    "provider": "Anthropic",
+    "description": "For writing and everyday conversations",
+    "access_tier": "free",
+    "reasoning_efforts": [
+      "none",
+      "low"
+    ],
+    "supports_images": true,
+    "supports_pdf": true,
+    "supports_tools": true,
+    "beta": false,
+    "attachment_profile": {
+      "max_dimension": 512,
+      "images_per_message": 3,
+      "images_per_conversation": 5,
+      "supports_pdf": true
+    }
+  },
+  {
+    "constant": "MISTRAL_SMALL_4",
+    "id": "mistral-small-2603",
+    "name": "Mistral Small 4",
+    "provider": "Mistral AI",
+    "description": "Open model \u00b7 Text only",
+    "access_tier": "free",
+    "reasoning_efforts": [
+      "none"
+    ],
+    "supports_images": false,
+    "supports_pdf": false,
+    "supports_tools": false,
+    "beta": false,
+    "attachment_profile": null
+  },
+  {
+    "constant": "GPT_OSS_120B",
+    "id": "tinfoil/gpt-oss-120b",
+    "name": "gpt-oss 120B",
+    "provider": "OpenAI",
+    "description": "Private reasoning \u00b7 Text only",
+    "access_tier": "free",
+    "reasoning_efforts": [
+      "low"
+    ],
+    "supports_images": false,
+    "supports_pdf": false,
+    "supports_tools": true,
+    "beta": false,
+    "attachment_profile": null
+  },
+  {
+    "constant": "GEMMA_4_31B",
+    "id": "tinfoil/gemma4-31b",
+    "name": "Gemma 4 31B",
+    "provider": "Google",
+    "description": "Private reasoning with images",
+    "access_tier": "free",
+    "reasoning_efforts": [
+      "none",
+      "low"
+    ],
+    "supports_images": true,
+    "supports_pdf": false,
+    "supports_tools": true,
+    "beta": true,
+    "attachment_profile": {
+      "max_dimension": 512,
+      "images_per_message": 3,
+      "images_per_conversation": 5,
+      "supports_pdf": false
+    }
+  },
+  {
+    "constant": "GPT_5_6_TERRA",
+    "id": "gpt-5.6-terra",
+    "name": "GPT-5.6 Terra",
+    "provider": "OpenAI",
+    "description": "Advanced everyday reasoning",
+    "access_tier": "plus",
+    "reasoning_efforts": [
+      "none",
+      "low",
+      "medium"
+    ],
+    "supports_images": true,
+    "supports_pdf": true,
+    "supports_tools": true,
+    "beta": false,
+    "attachment_profile": {
+      "max_dimension": 1024,
+      "images_per_message": 3,
+      "images_per_conversation": 10,
+      "supports_pdf": true
+    }
+  },
+  {
+    "constant": "CLAUDE_SONNET_4_6",
+    "id": "claude-sonnet-4-6",
+    "name": "Claude Sonnet 4.6",
+    "provider": "Anthropic",
+    "description": "Advanced writing and reasoning",
+    "access_tier": "plus",
+    "reasoning_efforts": [
+      "none",
+      "low"
+    ],
+    "supports_images": true,
+    "supports_pdf": true,
+    "supports_tools": true,
+    "beta": false,
+    "attachment_profile": {
+      "max_dimension": 1024,
+      "images_per_message": 3,
+      "images_per_conversation": 10,
+      "supports_pdf": true
+    }
+  },
+  {
+    "constant": "GPT_5_6_SOL",
+    "id": "gpt-5.6-sol",
+    "name": "GPT-5.6 Sol",
+    "provider": "OpenAI",
+    "description": "Deeper reasoning",
+    "access_tier": "pro",
+    "reasoning_efforts": [
+      "none",
+      "low",
+      "medium"
+    ],
+    "supports_images": true,
+    "supports_pdf": true,
+    "supports_tools": true,
+    "beta": false,
+    "attachment_profile": {
+      "max_dimension": 1024,
+      "images_per_message": 3,
+      "images_per_conversation": 10,
+      "supports_pdf": true
+    }
+  },
+  {
+    "constant": "CLAUDE_OPUS_4_8",
+    "id": "claude-opus-4-8",
+    "name": "Claude Opus 4.8",
+    "provider": "Anthropic",
+    "description": "Complex reasoning tasks",
+    "access_tier": "pro",
+    "reasoning_efforts": [
+      "none",
+      "low",
+      "medium"
+    ],
+    "supports_images": true,
+    "supports_pdf": true,
+    "supports_tools": true,
+    "beta": false,
+    "attachment_profile": {
+      "max_dimension": 1024,
+      "images_per_message": 3,
+      "images_per_conversation": 10,
+      "supports_pdf": true
+    }
+  }
+]

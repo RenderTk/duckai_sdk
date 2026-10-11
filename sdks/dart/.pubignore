@@ -1,0 +1,11 @@
+.dart_tool/
+.metadata
+.flutter-plugins-dependencies
+build/
+pubspec.lock
+example/build/
+example/.dart_tool/
+example/ios/Pods/
+example/ios/Flutter/ephemeral/
+example/android/.gradle/
+example/android/local.properties
