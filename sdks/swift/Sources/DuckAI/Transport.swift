@@ -86,6 +86,7 @@ struct SSEDecoder {
     private var afterCR = false
     private var received = 0
     let maxBytes: Int
+    init(maxBytes: Int) { self.maxBytes = maxBytes }
     mutating func feed(_ bytes: Data, eof: Bool = false) throws -> [SSEEvent] {
         received += bytes.count
         guard received <= maxBytes else { throw DuckAIError(detail: "Duck.ai response exceeds collection limit") }
