@@ -24,3 +24,4 @@ obj/
 *.snupkg
 sdks/dart/pubspec.lock
 sdks/dart/.metadata
+examples/
