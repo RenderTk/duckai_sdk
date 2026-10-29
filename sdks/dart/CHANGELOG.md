@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.1
+
+- Keep the headless browser document out of accessibility/focus navigation while retaining native WebKit execution for bootstrap and streaming.
+
 ## 0.2.0
 
 - Pin `flutter_inappwebview` 6.2.0-beta.3 for iOS Swift Package Manager support and bundled privacy resources; the WebView dependency is an upstream prerelease.

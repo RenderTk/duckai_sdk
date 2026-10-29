@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:collection';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
@@ -130,6 +131,26 @@ class AnonymousTokenProvider implements TokenProvider {
         final generation = _generation;
         final created = Completer<void>();
         _web = HeadlessInAppWebView(
+          // The native plugin keeps its headless WKWebView behind Flutter at
+          // alpha 0.01 so WebKit executes reliably. Exclude that private page
+          // from assistive navigation and focus without stopping its scripts.
+          initialUserScripts: UnmodifiableListView([
+            UserScript(
+              source: '''(() => {
+                const hide = () => {
+                  const root = document.documentElement;
+                  if (root) {
+                    root.setAttribute('aria-hidden', 'true');
+                    root.setAttribute('inert', '');
+                  }
+                };
+                hide();
+                new MutationObserver(hide).observe(document, {childList: true});
+              })();''',
+              injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
+              forMainFrameOnly: true,
+            ),
+          ]),
           initialUrlRequest: URLRequest(url: WebUri('https://duck.ai/')),
           initialSettings: InAppWebViewSettings(
             incognito: true,

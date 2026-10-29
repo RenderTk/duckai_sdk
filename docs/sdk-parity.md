@@ -66,7 +66,24 @@ Swift 6.4-only release initially selected by the resolver. Its iOS Simulator SPM
 build and Android debug build passed; Flutter analysis and all 17 Dart tests
 passed. CI explicitly enables SPM and builds the iOS example without
 running CocoaPods. A downstream Flutter consumer (Blazely) also built on both
-platforms, and real Luna requests completed on an iOS 26.5 simulator through
-its JSON-validating router, including image attachments. The Android example
-launched, but live prompt input could not be completed by the device automation
-helper; an Android build alone does not establish live-service behavior.
+platforms. Real Luna requests completed through Blazely's JSON-validating router
+on iOS 26.5 and Android 16 simulators, including a real food JPEG and generated
+nutrition label. Both platforms passed native cancellation followed by a
+successful recovery request. Cold Android attempts sometimes exceeded the
+application's six-second budget, and an upstream bootstrap returned HTTP 503;
+application fallback remains necessary. On iOS, an invalid live workout reply
+was rejected and recovered through Blazely's authenticated production API.
+
+### Flutter production hardening (2026-10-28)
+
+Dart SDK 0.2.1 makes its headless browser document inert and excludes its DOM
+from assistive navigation. The native plugin keeps its WKWebView behind Flutter
+for reliable script execution; its page controls previously appeared in the
+app's accessibility tree. A live iOS accessibility snapshot after this change
+contained no interactive Duck page controls, and Luna requests still completed.
+The SDK's 17 Dart tests passed. A downstream consumer passed a 16-case mixed
+Duck/API matrix on iOS and 15/16 primary-only cases in Android release mode; the
+remaining cold request exceeded the consumer's deadline. Native cancellation
+and recovery passed on both platforms. The consumer also compiled iOS device
+Release through SPM and a signed Android release bundle. These are simulator
+and build results, not a physical-device or sustained-availability certification.

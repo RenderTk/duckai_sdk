@@ -1,6 +1,6 @@
 name: duckai_sdk
 description: Native Duck.ai SDK for Flutter on iOS and Android with anonymous sessions and streaming.
-version: 0.2.0
+version: 0.2.1
 repository: https://github.com/RenderTk/duckai_sdk
 environment:
   sdk: '>=3.8.0 <4.0.0'
