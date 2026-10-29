@@ -32,21 +32,32 @@ Use a commit containing this package; pin a reviewed commit or release for repro
 
 ### iOS setup
 
-Set your Runner target and Podfile to iOS 15 or newer. If native pods specify an older deployment version, set their target to 15 in your existing Podfile post-install block:
+Set the Runner deployment target to iOS 15 or newer. Flutter's Swift Package
+Manager integration is supported: the SDK pins `flutter_inappwebview` to
+`6.2.0-beta.3`, whose iOS plugin includes its Swift package and privacy resources.
+The SDK and its example build without a Podfile or CocoaPods. The pinned WebView
+release is an upstream prerelease; keep the lockfile and verify native builds
+when changing it.
 
-```ruby
-platform :ios, '15.0'
-post_install do |installer|
-  installer.pods_project.targets.each do |target|
-    flutter_additional_ios_build_settings(target)
-    target.build_configurations.each do |config|
-      config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '15.0'
-    end
-  end
-end
+The example commits its Swift package resolution, including Swift Collections
+1.2.1 (Swift 5.10+). Keep these pins when building the example: newer Swift
+Collections releases may require a newer Xcode/Swift compiler. Consumers resolve
+their own Swift dependencies and should commit their app's package lockfile.
+
+Use a current Flutter stable release with Swift Package Manager enabled, then
+build from your app. On Apple Silicon you can verify the SPM-only example with:
+
+```sh
+flutter config --enable-swift-package-manager
+flutter build ios --simulator --debug --config-only
+cd ios
+xcodebuild -workspace Runner.xcworkspace -scheme Runner -sdk iphonesimulator \
+  -configuration Debug ARCHS=arm64 ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO build
 ```
 
-Keep the Flutter-generated settings and other post-install customizations. The WebView dependency currently uses CocoaPods on iOS. No App Transport Security exception is needed because the SDK uses HTTPS. Add any document-picker permissions required by your own picker package; the SDK does not request photo or file access itself.
+Existing CocoaPods consumers can continue using the dependency's podspec. No App Transport Security
+exception is needed because the SDK uses HTTPS. Add document/photo picker
+permissions only when your app uses those pickers.
 
 ### Android setup
 
@@ -56,7 +67,7 @@ Add the internet permission to the main manifest so release builds can connect:
 <uses-permission android:name="android.permission.INTERNET" />
 ```
 
-Set `minSdk` to 24 or higher. Keep Android System WebView updated; Duck.ai's challenge executes browser JavaScript and an obsolete WebView may fail regardless of Android version. The runnable example pins a compatible Android Gradle Plugin 8.13.2, Gradle 8.14.3 and Kotlin 2.2.20. The stable WebView dependency used here is incompatible with AGP 9's removal of the old default ProGuard configuration; use the example's AGP 8 setup with this dependency set. JDK 17 is the supported Android build baseline. No cleartext networking or browser activity intent is required.
+Set `minSdk` to 24 or higher. Keep Android System WebView updated; Duck.ai's challenge executes browser JavaScript and an obsolete WebView may fail regardless of Android version. The runnable example pins a compatible Android Gradle Plugin 8.13.2, Gradle 8.14.3 and Kotlin 2.2.20. Use the example's verified AGP 8 configuration with the pinned WebView release; an AGP 9 migration is a separate change. JDK 17 is the supported Android build baseline. No cleartext networking or browser activity intent is required.
 
 ## First request
 

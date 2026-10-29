@@ -50,7 +50,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
 
   Future<void> send() async {
     final token = CancellationToken();
-    final ai = DuckAI(model: Model.mistralSmall4);
+    final ai = DuckAI(model: Model.gpt6Luna);
     client = ai;
     setState(() {
       output = '';

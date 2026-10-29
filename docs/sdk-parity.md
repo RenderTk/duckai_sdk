@@ -56,3 +56,17 @@ Mobile checks first prepare bundled image/PDF fixtures through native APIs. Each
 Development verification on 2026-10-11 passed live two-turn sessions for C# and Swift on macOS, Swift and Flutter on iOS 18.6 and 26.5 simulators, and Flutter on Android 16. Android bootstrap cancellation was also verified through the example UI. Clean NuGet, Swift 6 and Flutter consumers verified packaged resources outside this checkout. iOS/macOS and Android examples built successfully; C# packed successfully and Flutter's publication dry run had no warnings.
 
 The declared minimum OS targets are iOS 15, macOS 12 and Android API 24. Live simulator checks above are evidence for the tested environments; they do not replace physical-device and deployment-specific testing. Windows/Linux CI coverage is configured separately. Duck.ai's upstream challenge and availability can change, so preserve explicit failure handling in applications.
+### Flutter SPM verification (2026-10-28)
+
+Dart SDK 0.2.0 pins `flutter_inappwebview` 6.2.0-beta.3, including its upstream
+iOS Swift package and privacy resources. The Flutter example no longer contains
+a Podfile, Pod lockfile, Pods build phases or Pods xcconfig/workspace references.
+The example pins Swift Collections 1.2.1 (Swift 5.10+) rather than the
+Swift 6.4-only release initially selected by the resolver. Its iOS Simulator SPM
+build and Android debug build passed; Flutter analysis and all 17 Dart tests
+passed. CI explicitly enables SPM and builds the iOS example without
+running CocoaPods. A downstream Flutter consumer (Blazely) also built on both
+platforms, and real Luna requests completed on an iOS 26.5 simulator through
+its JSON-validating router, including image attachments. The Android example
+launched, but live prompt input could not be completed by the device automation
+helper; an Android build alone does not establish live-service behavior.
