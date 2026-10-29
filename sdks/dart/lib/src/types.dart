@@ -1,11 +1,31 @@
-import 'dart:convert';
+import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
 
 /// JSON objects preserve unknown upstream fields in requests and responses.
 typedef Message = Map<String, dynamic>;
 typedef ContentPart = Map<String, dynamic>;
-T cloneJson<T>(T value) => jsonDecode(jsonEncode(value)) as T;
+T cloneJson<T>(T value) => _clone(value) as T;
+dynamic _clone(dynamic value) {
+  if (value is Map) {
+    final copy = <String, dynamic>{};
+    for (final entry in value.entries) {
+      if (entry.key is! String) {
+        throw ArgumentError('JSON object keys must be strings');
+      }
+      copy[entry.key as String] = _clone(entry.value);
+    }
+    return copy;
+  }
+  if (value is List) return value.map(_clone).toList();
+  if (value == null ||
+      value is String ||
+      value is bool ||
+      (value is num && value.isFinite)) {
+    return value;
+  }
+  throw ArgumentError('Expected JSON-compatible data');
+}
 
 class DuckAIException implements Exception {
   final int statusCode;
@@ -81,11 +101,37 @@ class CancellationToken {
       _listeners.remove(callback);
     };
   }
+
+  /// Stop waiting promptly even when a custom implementation finishes late.
+  Future<T> bind<T>(Future<T> operation, {void Function(T)? onCancelledValue}) {
+    final result = Completer<T>();
+    final remove = listen(() {
+      if (!result.isCompleted) result.completeError(CancelledException());
+    });
+    operation
+        .then(
+          (value) {
+            if (!result.isCompleted) {
+              result.complete(value);
+            } else if (_cancelled) {
+              onCancelledValue?.call(value);
+            }
+          },
+          onError: (Object error, StackTrace stack) {
+            if (!result.isCompleted) result.completeError(error, stack);
+          },
+        )
+        .whenComplete(remove);
+    return result.future;
+  }
 }
 
 class Settings {
   final Map<String, String> headers;
   final bool autoToken;
+  final bool retainEvents;
+  final int maxBufferedBytes;
+  final int? maxHistoryMessages;
   final Duration timeout, tokenGenerationTimeout;
   final int maxCollectedBytes,
       maxDocumentUploadBytes,
@@ -95,6 +141,9 @@ class Settings {
   Settings({
     Map<String, String> headers = const {},
     this.autoToken = true,
+    this.retainEvents = true,
+    this.maxBufferedBytes = 256 * 1024,
+    this.maxHistoryMessages,
     this.timeout = const Duration(seconds: 120),
     this.tokenGenerationTimeout = const Duration(seconds: 30),
     this.maxCollectedBytes = 8 * 1024 * 1024,
@@ -105,7 +154,9 @@ class Settings {
   }) : headers = Map.unmodifiable({
          for (final e in headers.entries) e.key.toLowerCase(): e.value,
        }) {
-    if (timeout <= Duration.zero ||
+    if (maxBufferedBytes < 16384 ||
+        (maxHistoryMessages != null && maxHistoryMessages! < 2) ||
+        timeout <= Duration.zero ||
         tokenGenerationTimeout <= Duration.zero ||
         maxCollectedBytes <= 0 ||
         maxDocumentUploadBytes <= 0 ||
@@ -181,11 +232,20 @@ class ChatOptions {
 
 class ChatResponse {
   final String model;
-  String text = '';
+  final bool retainEvents;
+  final _text = StringBuffer();
+  String? _cachedText;
+  String get text => _cachedText ??= _text.toString();
+  set text(String value) {
+    _text.clear();
+    _text.write(value);
+    _cachedText = value;
+  }
+
   bool done = false;
   final List<dynamic> _events = [];
   final List<Map<String, dynamic>> _parts = [];
-  ChatResponse(this.model);
+  ChatResponse(this.model, {this.retainEvents = true});
   List<dynamic> get events => cloneJson<List<dynamic>>(_events);
   Message get assistantMessage => {
     'role': 'assistant',
@@ -193,7 +253,7 @@ class ChatResponse {
     if (_parts.isNotEmpty) 'parts': cloneJson<List<dynamic>>(_parts),
   };
   String append(dynamic event) {
-    _events.add(cloneJson<dynamic>(event));
+    if (retainEvents) _events.add(cloneJson<dynamic>(event));
     if (event is! Map) return '';
     if (event['parts'] is List) {
       for (final part in event['parts'] as List) {
@@ -209,7 +269,10 @@ class ChatResponse {
       }
     }
     final delta = event['message'] is String ? event['message'] as String : '';
-    text += delta;
+    if (delta.isNotEmpty) {
+      _text.write(delta);
+      _cachedText = null;
+    }
     return delta;
   }
 

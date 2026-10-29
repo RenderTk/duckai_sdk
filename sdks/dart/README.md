@@ -84,6 +84,8 @@ Future<String> ask() async {
 
 The default model is `Model.gpt6Luna`. The first request starts an isolated, nonpersistent headless native WebView and obtains a fresh anonymous challenge. The client owns the WebView and its active streams; always `await ai.close()` when finished. Closing is idempotent. Create a new client after closing one.
 
+Complete turns sharing one native WebView run in order, including session generation and streaming. Cancelling a queued turn leaves the current turn intact. Use separately owned clients if independent sessions must run concurrently. `await ai.close()` waits for owned WebView disposal.
+
 Duck.ai controls availability, rate limits and model entitlement. Anonymous sessions do not unlock subscriber models. Upstream failures are surfaced; the package does not fabricate responses or silently retry chat turns.
 
 ## Streaming and cancellation
@@ -188,6 +190,8 @@ Reads are bounded before loading the entire file. Preparation creates JSON conte
 
 Images accept PNG, JPEG, WebP and GIF, use the first frame, apply orientation, resize without enlargement and encode as PNG. PDF validation uses the operating system's PDF reader through the bundled dependency; run PDF preparation after Flutter initialization on the main isolate.
 
+Image conversion, document extraction and payload attachment validation run in worker isolates, with one worker at a time to bound CPU and memory use. Cancelling a turn terminates its worker. Standalone preparation also supports cancellation: `ai.prepareFiles([file], cancellationToken: token)`. Closing the client cancels its pending preparation work. Native WebView and PDF plugin calls remain on the main isolate.
+
 Included exported formats cover modern Word, Excel, PowerPoint, OpenDocument, flat OpenDocument XML, modern Visio, SVG, HTML/XHTML, plain text/Markdown, CSV/TSV/DIF/SLK, JSON/XML, calendar/contact and web/archive exports. `supportedFileExtensions()` returns the complete package catalogue. Mobile does not run LibreOffice. Legacy binary Office documents, XLS/XLSB, MSG/OFT, native Apple/Google files and proprietary databases require a supported export or PDF. Cloud document links are not fetched. See the [shared format guide](../../docs/file-formats.md) for export choices and desktop-only reader differences.
 
 Limits apply to retained conversation history:
@@ -213,7 +217,7 @@ void dispose() {
 }
 ```
 
-Import `dart:async` for `unawaited`. Check `mounted` before UI updates. Keep a client at the screen/service scope appropriate to your app; do not create clients during every widget `build()`. Do not call platform WebView/PDF APIs from a background isolate. Text/image preparation can be moved to a worker by your app if needed, but browser operations remain on the main isolate.
+Import `dart:async` for `unawaited`. Check `mounted` before UI updates. Keep a client at the screen/service scope appropriate to your app; do not create clients during every widget `build()`. Call SDK APIs from the main isolate; the SDK schedules pure image/document work in workers while keeping platform WebView/PDF operations on the main isolate.
 
 The [runnable example](example/lib/main.dart) includes Send, Cancel, disposal, foreground/background handling and a two-turn live check:
 
@@ -232,14 +236,23 @@ final ai = DuckAI(settings: Settings(
   timeout: const Duration(seconds: 90),
   tokenGenerationTimeout: const Duration(seconds: 45),
   maxDocumentTextCharacters: 8000,
+  retainEvents: false,
+  maxBufferedBytes: 256 * 1024,
+  maxHistoryMessages: 100,
 ));
 ```
 
-Defaults: chat 120 seconds, session generation 30 seconds, collection 8 MiB. Positive upload/collection/pixel limits are configurable; document text limits can be lowered but cannot exceed 16,000. The package uses explicit settings, not desktop environment variables.
+`timeout` is an end-to-end deadline starting when a turn is listened to. It includes conversation/session queues, attachment preparation, bootstrap, response headers and streaming. The default is 120 seconds; session generation additionally has its own 30-second limit. A timed-out paused stream releases its session, and delivers its terminal error when resumed.
+
+Collection defaults to 8 MiB. `maxBufferedBytes` limits queued native bridge data (default 256 KiB, minimum 16 KiB, plus a chunk already being consumed). Overflow aborts the request with an explicit error; bytes are not silently dropped. Consume deltas promptly and cancel when leaving a screen.
+
+`retainEvents` defaults to `true` for compatibility. Set it to `false` to avoid storing raw events: `response.events` will be empty, while text and assistant parts required for conversation history are preserved. Avoid reading/cloning the full event list on every delta. Text accumulation uses a buffer and materializes `response.text` on demand.
+
+`maxHistoryMessages` optionally caps outgoing messages including the new prompt; its default is unlimited. Exceeding it rejects the turn locally with status 413 and preserves committed history. Clear or shorten history explicitly; the SDK does not silently discard context. Upload/collection/pixel limits are configurable; document text limits can be lowered but cannot exceed 16,000. The package uses explicit settings, not desktop environment variables.
 
 `DuckAIException` exposes `statusCode`, `detail`, `headers` and `retryAfter`. Specific errors are `RateLimitException` (429), `ChallengeException` (401/403/418), `AttachmentException` and `IncompleteResponseException`. Explicit cancellation raises `CancelledException`; invalid arguments use `ArgumentError` and closed objects use `StateError`. Preserve partial output when appropriate and offer explicit retry. `retryAfter` is the original string and may contain seconds or an HTTP date.
 
-Advanced integrations can implement `TokenProvider` and `DuckAITransport`, or supply fresh captured `Settings.headers` with `autoToken: false`. Captured challenges expire and may be tied to a browser; they are not permanent mobile credentials. Custom/captured session configurations use native HTTP unless a transport is explicitly provided. Injected implementations must honor cancellation and bounds. Closing the client closes its provider and transport.
+Advanced integrations can implement `TokenProvider` and `DuckAITransport`, or supply fresh captured `Settings.headers` with `autoToken: false`. Captured challenges expire and may be tied to a browser; they are not permanent mobile credentials. Custom/captured session configurations use native HTTP unless a transport is explicitly provided. Injected implementations must honor cancellation and bounds. `DuckAITransport.close()` accepts `FutureOr<void>`; asynchronous transports should return their disposal future. Closing the client awaits its transport and provider, including when transport cleanup fails.
 
 ## Development and packaging
 
@@ -252,3 +265,5 @@ dart pub publish --dry-run
 ```
 
 Unit tests use deterministic request, bytewise Unicode SSE and document fixtures. Live checks are separate, require Duck.ai access and consume quota. Run `python scripts/sync_protocol.py --check` from the repository root to check packaged model/scripts. Dependency updates must be validated with both an iOS simulator/device build and an Android build; a Dart analyzer success alone does not validate native plugins.
+
+Reliability regressions cover shared-session cancellation, queued-turn deadlines, awaited disposal, worker cancellation, main-isolate responsiveness during image processing, bounded bridge buffering, optional event retention, history limits and XML complexity error status. Default WebView behavior still needs release validation on physical iOS/Android devices, especially app backgrounding and browser-process termination.

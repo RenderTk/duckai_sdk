@@ -23,7 +23,7 @@ abstract interface class DuckAITransport {
     Map<String, dynamic> body,
     CancellationToken cancellationToken,
   );
-  void close();
+  FutureOr<void> close();
 }
 
 class IOTransport implements DuckAITransport {

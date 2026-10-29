@@ -7,6 +7,8 @@ import 'package:flutter/widgets.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'types.dart';
 import 'transport.dart';
+import 'async_gate.dart';
+import 'browser_request.dart';
 
 abstract interface class TokenProvider {
   Future<Map<String, String>> headers({CancellationToken? cancellationToken});
@@ -16,17 +18,32 @@ abstract interface class TokenProvider {
 /// Uses the OS browser engine; no subprocess, remote server or visible login.
 class AnonymousTokenProvider implements TokenProvider {
   final Duration timeout;
+  final int maxBufferedBytes;
   final String _journey = List.generate(
     16,
     (_) => Random.secure().nextInt(256).toRadixString(16).padLeft(2, '0'),
   ).join();
   HeadlessInAppWebView? _web;
   InAppWebViewController? _controller;
-  bool _closed = false, _busy = false;
+  bool _closed = false;
+  int _generation = 0;
+  final _bootstrap = AsyncGate();
+  final _sessions = AsyncGate();
+  Future<void>? _closing;
+  Future<void> _resetting = Future.value();
   void Function(Object)? _abortActive;
-  final Map<String, _BrowserRequest> _requests = {};
-  AnonymousTokenProvider({this.timeout = const Duration(seconds: 30)});
-  Future<void> _reset() async {
+  final Map<String, BrowserRequest> _requests = {};
+  AnonymousTokenProvider({
+    this.timeout = const Duration(seconds: 30),
+    this.maxBufferedBytes = 256 * 1024,
+  });
+
+  /// One complete turn owns the context, including bootstrap and streaming.
+  Future<void Function()> acquireSession(CancellationToken token) =>
+      _sessions.acquire(token);
+
+  Future<void> _reset() {
+    _generation++;
     for (final state in List.of(_requests.values)) {
       state.fail(CancelledException());
     }
@@ -34,14 +51,23 @@ class AnonymousTokenProvider implements TokenProvider {
     final web = _web;
     _web = null;
     _controller = null;
-    if (web != null) {
-      await web.dispose();
-    }
+    final previous = _resetting;
+    return _resetting = () async {
+      try {
+        await previous;
+      } finally {
+        await web?.dispose();
+      }
+    }();
   }
 
   @override
-  Future<void> close() async {
+  Future<void> close() => _closing ??= _close();
+  Future<void> _close() async {
     _closed = true;
+    final reason = StateError('Token provider is closed');
+    _sessions.close(reason);
+    _bootstrap.close(reason);
     _abortActive?.call(StateError('Token provider is closed'));
     await _reset();
   }
@@ -50,16 +76,22 @@ class AnonymousTokenProvider implements TokenProvider {
   Future<Map<String, String>> headers({
     CancellationToken? cancellationToken,
   }) async {
-    while (_busy) {
-      cancellationToken?.throwIfCancelled();
-      if (_closed) throw StateError('Token provider is closed');
-      await Future<void>.delayed(const Duration(milliseconds: 10));
+    final release = await _bootstrap.acquire(cancellationToken);
+    try {
+      return await _headers(cancellationToken);
+    } finally {
+      release();
     }
+  }
+
+  Future<Map<String, String>> _headers(
+    CancellationToken? cancellationToken,
+  ) async {
+    cancellationToken?.throwIfCancelled();
     if (_closed) throw StateError('Token provider is closed');
     if (!Platform.isIOS && !Platform.isAndroid) {
       throw UnsupportedError('Automatic sessions support iOS and Android only');
     }
-    _busy = true;
     final failed = Completer<Never>();
     _abortActive = (error) {
       if (!failed.isCompleted) {
@@ -95,6 +127,7 @@ class AnonymousTokenProvider implements TokenProvider {
         await bounded(Future<void>.delayed(const Duration(milliseconds: 50)));
       }
       if (_web == null) {
+        final generation = _generation;
         final created = Completer<void>();
         _web = HeadlessInAppWebView(
           initialUrlRequest: URLRequest(url: WebUri('https://duck.ai/')),
@@ -106,12 +139,14 @@ class AnonymousTokenProvider implements TokenProvider {
             transparentBackground: true,
           ),
           onWebViewCreated: (controller) {
+            if (_closed || generation != _generation) return;
             _controller = controller;
             controller.addJavaScriptHandler(
               handlerName: 'duckaiStream',
               callback: (args) {
+                if (generation != _generation) return false;
                 if (args.isNotEmpty && args.first is Map) {
-                  _receive(Map<String, dynamic>.from(args.first as Map));
+                  return _receive(Map<String, dynamic>.from(args.first as Map));
                 }
                 return null;
               },
@@ -119,12 +154,13 @@ class AnonymousTokenProvider implements TokenProvider {
             if (!created.isCompleted) created.complete();
           },
           onWebContentProcessDidTerminate: (controller) {
-            _browserTerminated();
+            if (generation == _generation) _browserTerminated();
           },
           onRenderProcessGone: (controller, detail) {
-            _browserTerminated();
+            if (generation == _generation) _browserTerminated();
           },
           onReceivedError: (controller, request, error) {
+            if (generation != _generation) return;
             if (request.isForMainFrame == true && !failed.isCompleted) {
               failed.completeError(
                 DuckAIException(
@@ -135,6 +171,7 @@ class AnonymousTokenProvider implements TokenProvider {
             }
           },
           onReceivedHttpError: (controller, request, response) {
+            if (generation != _generation) return;
             if (request.isForMainFrame == true && !failed.isCompleted) {
               failed.completeError(
                 DuckAIException.upstream(
@@ -211,7 +248,6 @@ class AnonymousTokenProvider implements TokenProvider {
       timer.cancel();
       remove?.call();
       _abortActive = null;
-      _busy = false;
     }
   }
 
@@ -225,13 +261,13 @@ class AnonymousTokenProvider implements TokenProvider {
     }
     _requests.clear();
     _abortActive?.call(error);
-    unawaited(_reset());
+    unawaited(_reset().catchError((Object _) {}));
   }
 
-  void _receive(Map<String, dynamic> event) {
+  bool _receive(Map<String, dynamic> event) {
     final id = event['id'];
     final state = _requests[id];
-    if (state == null) return;
+    if (state == null) return false;
     switch (event['kind']) {
       case 'headers':
         state.headers(
@@ -243,15 +279,15 @@ class AnonymousTokenProvider implements TokenProvider {
         if (value is! String || value.length > 32768) {
           state.fail(DuckAIException(502, 'Invalid browser stream chunk'));
           _cancelRequest(id as String);
-          return;
+          return false;
         }
         try {
-          state.body.add(base64Decode(value));
+          return state.add(base64Decode(value));
         } catch (e) {
           state.fail(DuckAIException(502, 'Invalid browser stream chunk'));
         }
       case 'done':
-        state.body.close();
+        state.finish();
         _requests.remove(id);
       case 'error':
         state.fail(
@@ -264,10 +300,11 @@ class AnonymousTokenProvider implements TokenProvider {
         );
         _requests.remove(id);
     }
+    return true;
   }
 
-  void _cancelRequest(String id) {
-    _requests.remove(id)?.fail(CancelledException());
+  void _cancelRequest(String id, [Object? error]) {
+    _requests.remove(id)?.fail(error ?? CancelledException());
     final controller = _controller;
     if (controller != null) {
       unawaited(
@@ -295,10 +332,13 @@ class AnonymousTokenProvider implements TokenProvider {
       16,
       (_) => Random.secure().nextInt(256).toRadixString(16).padLeft(2, '0'),
     ).join();
-    final state = _BrowserRequest(() => _cancelRequest(id));
+    final state = BrowserRequest(
+      (error) => _cancelRequest(id, error),
+      maxBufferedBytes: maxBufferedBytes,
+    );
     _requests[id] = state;
     final remove = token.listen(() => _cancelRequest(id));
-    state.body.done.whenComplete(remove);
+    // The HTTP body owns this listener after headers have been delivered.
     try {
       final script = await rootBundle.loadString(
         'packages/duckai_sdk/assets/browser-transport.js',
@@ -320,7 +360,7 @@ class AnonymousTokenProvider implements TokenProvider {
         controller
             .callAsyncJavaScript(
               functionBody:
-                  "const emit = event => window.flutter_inappwebview.callHandler('duckaiStream',event);\n$script",
+                  "const emit = async event => { if (await window.flutter_inappwebview.callHandler('duckaiStream',event) === false) throw new Error('Native stream cancelled'); };\n$script",
               arguments: {
                 'requestId': id,
                 'requestHeaders': filtered,
@@ -348,40 +388,29 @@ class AnonymousTokenProvider implements TokenProvider {
               },
             ),
       );
-      return await state.ready.future;
+      final response = await state.ready.future;
+      return HTTPResponse(
+        response.statusCode,
+        response.headers,
+        _releaseListener(response.body, remove),
+        cancel: response.cancel,
+      );
     } catch (_) {
+      remove();
       _cancelRequest(id);
       rethrow;
     }
   }
 }
 
-class _BrowserRequest {
-  final ready = Completer<HTTPResponse>();
-  final body = StreamController<List<int>>();
-  final void Function() cancel;
-  bool failed = false;
-  _BrowserRequest(this.cancel) {
-    body.onCancel = cancel;
-  }
-  void headers(int status, Map<String, String> headers) {
-    if (!ready.isCompleted) {
-      ready.complete(
-        HTTPResponse(status, headers, body.stream, cancel: cancel),
-      );
-    }
-  }
-
-  void fail(Object error) {
-    if (failed) return;
-    failed = true;
-    if (!ready.isCompleted) {
-      ready.completeError(error);
-      body.close();
-    } else if (!body.isClosed) {
-      body.addError(error);
-      body.close();
-    }
+Stream<List<int>> _releaseListener(
+  Stream<List<int>> body,
+  void Function() remove,
+) async* {
+  try {
+    yield* body;
+  } finally {
+    remove();
   }
 }
 
@@ -391,9 +420,10 @@ class WebViewTransport implements DuckAITransport {
   final int maxBytes;
   WebViewTransport(this.provider, {this.maxBytes = 8 * 1024 * 1024});
   @override
-  void close() {
-    unawaited(provider.close());
-  }
+  Future<void> close() => provider.close();
+
+  Future<void Function()> acquireSession(CancellationToken token) =>
+      provider.acquireSession(token);
 
   @override
   Future<HTTPResponse> send(

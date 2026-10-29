@@ -5,8 +5,10 @@ import 'package:html/parser.dart' as html;
 import 'package:image/image.dart' as image;
 import 'package:pdfx/pdfx.dart';
 import 'package:xml/xml.dart';
+import 'package:xml/xml_events.dart' as events;
 import 'catalog.dart';
 import 'types.dart';
+import 'worker.dart';
 
 const documentPrefix = '[Attached document: ';
 const _documents = {
@@ -179,6 +181,34 @@ class Attachments {
     Settings settings, {
     CancellationToken? cancellationToken,
   }) async {
+    cancellationToken?.throwIfCancelled();
+    // Reject impossible native batches before decoding any of their files.
+    var images = 0, pdfs = 0, pdfBytes = 0;
+    for (final file in files) {
+      final ext = file.filename
+          .replaceAll('\\', '/')
+          .split('/')
+          .last
+          .split('.')
+          .last
+          .toLowerCase();
+      if (_documents.contains(ext)) continue;
+      if (_isPDF(file, ext)) {
+        pdfs++;
+        pdfBytes += file.data.length;
+      } else {
+        images++;
+      }
+    }
+    if (pdfs > 3) {
+      throw AttachmentException(422, 'Too many PDFs in conversation');
+    }
+    if (pdfBytes > 5 * 1024 * 1024) {
+      throw AttachmentException(413, 'Conversation PDFs exceed 5 MiB combined');
+    }
+    if (images > 0 && images > (await _profile(model)).imagesPerMessage) {
+      throw AttachmentException(422, 'Too many images in one message');
+    }
     final parts = <ContentPart>[];
     for (final file in files) {
       cancellationToken?.throwIfCancelled();
@@ -195,49 +225,92 @@ class Attachments {
         if (file.data.length > settings.maxDocumentUploadBytes) {
           throw AttachmentException(413, 'Document exceeds upload limit');
         }
-        final text = _extract(file.data, ext);
-        if (text.trim().isEmpty) {
-          throw AttachmentException(422, 'Document has no readable text');
-        }
-        parts.add({'type': 'text', 'text': '$documentPrefix$name]\n$text'});
+        parts.add(
+          await runAttachmentWorker(_documentJob, (
+            file.data,
+            ext,
+            name,
+            settings.maxDocumentTextCharacters,
+          ), cancellationToken),
+        );
         continue;
       }
       final p = await _profile(model);
+      cancellationToken?.throwIfCancelled();
       final mime = file.mimeType?.toLowerCase().split(';').first.trim();
-      if (ext == 'pdf' ||
-          mime == 'application/pdf' ||
-          (file.data.length >= 5 &&
-              ascii.decode(file.data.sublist(0, 5), allowInvalid: true) ==
-                  '%PDF-')) {
+      if (_isPDF(file, ext)) {
         if (!p.supportsPDF) {
           throw AttachmentException(422, '$model does not support PDFs');
         }
-        await _pdf(file.data);
+        await (cancellationToken?.bind(_pdf(file.data)) ?? _pdf(file.data));
         parts.add({
           'type': 'file',
           'mimeType': 'application/pdf',
           'encoding': 'base64',
           'filename': name,
-          'content': base64Encode(file.data),
+          'content': await runAttachmentWorker(
+            _encodeJob,
+            file.data,
+            cancellationToken,
+          ),
         });
       } else {
-        final (bytes, detected) = _image(
-          file.data,
-          settings,
-          dimension: p.maxDimension,
-          declared: mime == 'application/octet-stream' ? null : mime,
+        parts.add(
+          await runAttachmentWorker(_imageJob, (
+            file.data,
+            settings,
+            p.maxDimension,
+            mime == 'application/octet-stream' ? null : mime,
+          ), cancellationToken),
         );
-        parts.add({
-          'type': 'image',
-          'mimeType': detected,
-          'image': 'data:$detected;base64,${base64Encode(bytes)}',
-        });
       }
     }
     return [
       ...parts.where((p) => p['type'] != 'file'),
       ...parts.where((p) => p['type'] == 'file'),
     ];
+  }
+
+  static bool _isPDF(Attachment file, String ext) =>
+      ext == 'pdf' ||
+      file.mimeType?.toLowerCase().split(';').first.trim() ==
+          'application/pdf' ||
+      (file.data.length >= 5 &&
+          file.data[0] == 37 &&
+          file.data[1] == 80 &&
+          file.data[2] == 68 &&
+          file.data[3] == 70 &&
+          file.data[4] == 45);
+
+  static String _encodeJob(dynamic data) => base64Encode(data as Uint8List);
+
+  static ContentPart _documentJob(dynamic job) {
+    final (data, ext, name, limit) = job as (Uint8List, String, String, int);
+    final text = _extract(data, ext);
+    if (text.trim().isEmpty) {
+      throw AttachmentException(422, 'Document has no readable text');
+    }
+    final labelled = '$documentPrefix$name]\n$text';
+    if (labelled.length > limit) {
+      throw AttachmentException(413, 'Document exceeds text limit');
+    }
+    return {'type': 'text', 'text': labelled};
+  }
+
+  static ContentPart _imageJob(dynamic job) {
+    final (data, settings, dimension, mime) =
+        job as (Uint8List, Settings, int, String?);
+    final (bytes, detected) = _image(
+      data,
+      settings,
+      dimension: dimension,
+      declared: mime,
+    );
+    return {
+      'type': 'image',
+      'mimeType': detected,
+      'image': 'data:$detected;base64,${base64Encode(bytes)}',
+    };
   }
 
   static Uint8List _base64(String value, int limit) {
@@ -256,8 +329,36 @@ class Attachments {
   static Future<void> validate(
     List<Message> messages,
     String model,
-    Settings settings,
-  ) async {
+    Settings settings, {
+    CancellationToken? cancellationToken,
+  }) async {
+    cancellationToken?.throwIfCancelled();
+    if (!messages.any((m) => m['role'] == 'user' && m['content'] is List)) {
+      return;
+    }
+    final profile = (await Catalog.getModel(model))?.attachmentProfile;
+    final pdfs = await runAttachmentWorker(_validateJob, (
+      messages,
+      model,
+      settings,
+      profile,
+    ), cancellationToken);
+    for (final bytes in pdfs) {
+      cancellationToken?.throwIfCancelled();
+      await (cancellationToken?.bind(_pdf(bytes)) ?? _pdf(bytes));
+    }
+  }
+
+  static List<Uint8List> _validateJob(dynamic job) {
+    final (messages, model, settings, selected) =
+        job as (List<Message>, String, Settings, AttachmentProfile?);
+    AttachmentProfile profile() =>
+        selected ??
+        (throw AttachmentException(
+          422,
+          '$model has no known native attachment support',
+        ));
+    final nativePDFs = <Uint8List>[];
     var images = 0, pdfs = 0, pdfBytes = 0;
     for (final message in messages.where(
       (m) => m['role'] == 'user' && m['content'] is List,
@@ -281,7 +382,7 @@ class Attachments {
       var count = 0;
       for (final part in parts) {
         if (part['type'] == 'file') {
-          if (!(await _profile(model)).supportsPDF ||
+          if (!profile().supportsPDF ||
               part['mimeType'] != 'application/pdf' ||
               part['encoding'] != 'base64') {
             throw AttachmentException(422, 'Invalid or unsupported PDF');
@@ -290,7 +391,7 @@ class Attachments {
             part['content'] as String? ?? '',
             5 * 1024 * 1024,
           );
-          await _pdf(bytes);
+          nativePDFs.add(bytes);
           pdfs++;
           pdfBytes += bytes.length;
         } else if (part['type'] == 'image') {
@@ -311,8 +412,7 @@ class Attachments {
           count++;
         }
       }
-      if (count > 0 &&
-          (count > (await _profile(model)).imagesPerMessage || length > 4500)) {
+      if (count > 0 && (count > profile().imagesPerMessage || length > 4500)) {
         throw AttachmentException(
           422,
           'Image count or 4,500-character message limit exceeded',
@@ -320,7 +420,7 @@ class Attachments {
       }
       images += count;
     }
-    if (images > 0 && images > (await _profile(model)).imagesPerConversation) {
+    if (images > 0 && images > profile().imagesPerConversation) {
       throw AttachmentException(422, 'Too many images in conversation');
     }
     if (pdfs > 3) {
@@ -329,6 +429,7 @@ class Attachments {
     if (pdfBytes > 5 * 1024 * 1024) {
       throw AttachmentException(413, 'Conversation PDFs exceed 5 MiB combined');
     }
+    return nativePDFs;
   }
 
   static XmlDocument _xml(List<int> bytes) {
@@ -337,17 +438,28 @@ class Attachments {
       throw AttachmentException(422, 'XML entities/DTDs are not supported');
     }
     try {
-      final document = XmlDocument.parse(text);
-      final pending = <(XmlNode, int)>[(document.rootElement, 0)];
-      var count = 0;
-      while (pending.isNotEmpty) {
-        final (node, depth) = pending.removeLast();
-        if (++count > 100000 || depth >= 128) {
+      var count = 0, depth = 0;
+      // Pull-parse budgets before constructing the retained document tree.
+      for (final event in events.parseEvents(
+        text,
+        validateNesting: true,
+        validateDocument: true,
+      )) {
+        if (event is events.XmlEndElementEvent) {
+          depth--;
+          continue;
+        }
+        if (++count > 100000 ||
+            (event is events.XmlStartElementEvent && depth >= 128)) {
           throw AttachmentException(413, 'Document XML is too complex');
         }
-        pending.addAll(node.children.map((child) => (child, depth + 1)));
+        if (event is events.XmlStartElementEvent && !event.isSelfClosing) {
+          depth++;
+        }
       }
-      return document;
+      return XmlDocument.parse(text);
+    } on AttachmentException {
+      rethrow;
     } catch (_) {
       throw AttachmentException(422, 'Invalid document XML');
     }
@@ -395,11 +507,11 @@ class Attachments {
   }
 
   static String _extract(List<int> data, String ext) {
-    final text = utf8.decode(data, allowMalformed: true);
     if ({'xml', 'svg', 'vdx', 'fodt', 'fods', 'fodp', 'fodg'}.contains(ext)) {
       return _textXML(data);
     }
     if ({'html', 'htm', 'xhtml'}.contains(ext)) {
+      final text = utf8.decode(data, allowMalformed: true);
       final doc = html.parse(text);
       for (final n in doc.querySelectorAll('script,style')) {
         n.remove();
@@ -407,6 +519,7 @@ class Attachments {
       return doc.body?.text ?? '';
     }
     if (ext == 'rtf') {
+      final text = utf8.decode(data, allowMalformed: true);
       return text
           .replaceAll(RegExp(r'\\[a-zA-Z]+(?:-?\d+)? ?|[{}]'), '')
           .replaceAllMapped(
@@ -447,7 +560,7 @@ class Attachments {
       'zip',
       'epub',
     };
-    if (!archives.contains(ext)) return text;
+    if (!archives.contains(ext)) return utf8.decode(data, allowMalformed: true);
     try {
       final archive = ZipDecoder().decodeBytes(data, verify: true);
       if (archive.length > 2000 ||

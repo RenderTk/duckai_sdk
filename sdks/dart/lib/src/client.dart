@@ -8,6 +8,7 @@ import 'model.dart';
 import 'sse.dart';
 import 'transport.dart';
 import 'types.dart';
+import 'async_gate.dart';
 
 class DuckAI {
   final String model;
@@ -15,6 +16,7 @@ class DuckAI {
   late final TokenProvider _tokens;
   late final DuckAITransport _transport;
   final Set<ChatStream> _streams = {};
+  final _lifetime = CancellationToken();
   bool _closed = false;
   Future<void>? _closing;
   DuckAI({
@@ -29,7 +31,10 @@ class DuckAI {
             transport == null &&
             !this.settings.headers.containsKey('x-vqd-hash-1') &&
             !this.settings.headers.containsKey('x-vqd-4')
-        ? AnonymousTokenProvider(timeout: this.settings.tokenGenerationTimeout)
+        ? AnonymousTokenProvider(
+            timeout: this.settings.tokenGenerationTimeout,
+            maxBufferedBytes: this.settings.maxBufferedBytes,
+          )
         : null;
     _tokens =
         tokenProvider ??
@@ -51,13 +56,15 @@ class DuckAI {
   Future<void> close() => _closing ??= _close();
   Future<void> _close() async {
     _closed = true;
+    _lifetime.cancel();
     try {
-      for (final stream in List.of(_streams)) {
-        await stream.close();
-      }
+      await Future.wait(List.of(_streams).map((stream) => stream.close()));
     } finally {
-      _transport.close();
-      await _tokens.close();
+      try {
+        await _transport.close();
+      } finally {
+        await _tokens.close();
+      }
     }
   }
 
@@ -68,18 +75,35 @@ class DuckAI {
   Future<List<ContentPart>> prepareFiles(
     List<Attachment> files, {
     String? model,
+    CancellationToken? cancellationToken,
   }) async {
     _check();
-    final id = model ?? this.model;
-    final parts = await Attachments.prepare(files, id, settings);
-    await Attachments.validate(
-      [
-        {'role': 'user', 'content': parts},
-      ],
-      id,
-      settings,
-    );
-    return parts;
+    final token = CancellationToken();
+    final removeCaller = cancellationToken?.listen(token.cancel);
+    final removeLifetime = _lifetime.listen(token.cancel);
+    try {
+      final id = model ?? this.model;
+      final parts = await Attachments.prepare(
+        files,
+        id,
+        settings,
+        cancellationToken: token,
+      );
+      await Attachments.validate(
+        [
+          {'role': 'user', 'content': parts},
+        ],
+        id,
+        settings,
+        cancellationToken: token,
+      );
+      token.throwIfCancelled();
+      _check();
+      return parts;
+    } finally {
+      removeCaller?.call();
+      removeLifetime();
+    }
   }
 
   ChatStream stream(
@@ -123,6 +147,14 @@ class DuckAI {
     token.throwIfCancelled();
     final id = options.model ?? model;
     if (id.trim().isEmpty) throw ArgumentError('Model must not be empty');
+    final count = options.messages.length + (prompt == null ? 0 : 1);
+    final limit = settings.maxHistoryMessages;
+    if (limit != null && count > limit) {
+      throw DuckAIException(
+        413,
+        'Conversation exceeds message limit; clear or shorten its history',
+      );
+    }
     final messages = cloneJson<List<dynamic>>(options.messages).cast<Message>();
     if (prompt != null) messages.add({'role': 'user', 'content': prompt});
     if (messages.isEmpty ||
@@ -157,7 +189,12 @@ class DuckAI {
     if (info != null && !info.reasoningEfforts.contains(reasoning)) {
       throw ArgumentError('Unsupported reasoning effort for ${info.name}');
     }
-    await Attachments.validate(messages, id, settings);
+    await Attachments.validate(
+      messages,
+      id,
+      settings,
+      cancellationToken: token,
+    );
     token.throwIfCancelled();
     _check();
     return {
@@ -173,7 +210,6 @@ class DuckAI {
   Future<HTTPResponse> _open(
     Map<String, dynamic> body,
     CancellationToken token,
-    void Function() networkReady,
   ) async {
     _check();
     final headers = <String, String>{
@@ -194,18 +230,22 @@ class DuckAI {
           'Supply fresh captured headers or enable autoToken',
         );
       }
-      headers.addAll(await _tokens.headers(cancellationToken: token));
+      headers.addAll(
+        await token.bind(_tokens.headers(cancellationToken: token)),
+      );
     }
     token.throwIfCancelled();
     _check();
-    networkReady();
     HTTPResponse response;
     try {
-      response = await _transport.send(
-        Uri.parse('https://duck.ai/duckchat/v1/chat'),
-        headers,
-        body,
-        token,
+      response = await token.bind(
+        _transport.send(
+          Uri.parse('https://duck.ai/duckchat/v1/chat'),
+          headers,
+          body,
+          token,
+        ),
+        onCancelledValue: (response) => response.cancel(),
       );
     } on SocketException catch (e) {
       throw DuckAIException(502, 'Could not connect to Duck.ai: $e');
@@ -256,22 +296,39 @@ class ChatStream extends Stream<String> {
   HTTPResponse? _network;
   Timer? _timer;
   bool _timedOut = false;
+  StreamSubscription<dynamic>? _source;
+  Future<void>? _closing;
   ChatStream._(
     this._client,
     this._prompt,
     this._options, {
     Future<ChatOptions> Function(CancellationToken)? acquire,
     void Function(ChatStream)? finish,
-  }) : response = ChatResponse(_options.model ?? _client.model),
+  }) : response = ChatResponse(
+         _options.model ?? _client.model,
+         retainEvents: _client.settings.retainEvents,
+       ),
        _acquire = acquire,
        _finish = finish;
-  Future<void> close() async {
-    if (_closed) return;
+  void _cleanup() {
     _closed = true;
-    _token.cancel();
-    _network?.cancel();
+    _cancel();
     _timer?.cancel();
     _client._streams.remove(this);
+  }
+
+  void _cancel() {
+    _token.cancel();
+    _network?.cancel();
+    // Finish cleanup even while the caller has paused its subscription. The
+    // outer controller retains the terminal error until the caller resumes.
+    if (_source?.isPaused == true) _source?.resume();
+  }
+
+  Future<void> close() => _closing ??= _close();
+  Future<void> _close() async {
+    _cleanup();
+    await _source?.cancel();
   }
 
   Stream<dynamic> get events => _make(true);
@@ -288,33 +345,44 @@ class ChatStream extends Stream<String> {
     cancelOnError: cancelOnError,
   );
   Stream<dynamic> _make(bool raw) {
-    late StreamSubscription<dynamic> subscription;
     final controller = StreamController<dynamic>();
+    var ownsSource = false;
     controller.onListen = () {
-      subscription = _run(raw).listen(
+      if (_consumed) {
+        controller.addError(StateError('A stream has one consumer'));
+        controller.close();
+        return;
+      }
+      _consumed = true;
+      ownsSource = true;
+      _source = _run(raw).listen(
         controller.add,
         onError: controller.addError,
         onDone: controller.close,
       );
     };
     controller.onPause = () {
-      subscription.pause();
+      if (ownsSource) _source?.pause();
     };
     controller.onResume = () {
-      subscription.resume();
+      if (ownsSource) _source?.resume();
     };
     controller.onCancel = () async {
-      await close();
-      await subscription.cancel();
+      if (ownsSource) await close();
     };
     return controller.stream;
   }
 
   Stream<dynamic> _run(bool raw) async* {
-    if (_consumed) throw StateError('A stream has one consumer');
-    _consumed = true;
     if (_closed) throw StateError('Stream is closed');
-    final remove = _options.cancellationToken?.listen(_token.cancel);
+    final remove = _options.cancellationToken?.listen(_cancel);
+    void Function()? releaseSession;
+    StreamIterator<SSEEvent>? iterator;
+    // Covers queues, attachment workers, bootstrap, headers, and the response.
+    _timer = Timer(_client.settings.timeout, () {
+      _timedOut = true;
+      _cancel();
+    });
     try {
       _token.throwIfCancelled();
       var options = _options;
@@ -322,18 +390,18 @@ class ChatStream extends Stream<String> {
         options = await _acquire(_token);
         _acquired = true;
       }
-      _request = await _client._request(_prompt, options, _token);
-      _network = await _client._open(_request!, _token, () {
-        _timer = Timer(_client.settings.timeout, () {
-          _timedOut = true;
-          _token.cancel();
-          _network?.cancel();
-        });
-      });
-      await for (final event in parseSSE(
-        _network!.body,
-        _client.settings.maxCollectedBytes,
-      )) {
+      _request = await _token.bind(_client._request(_prompt, options, _token));
+      final transport = _client._transport;
+      if (transport is WebViewTransport) {
+        releaseSession = await transport.acquireSession(_token);
+      }
+      _token.throwIfCancelled();
+      _network = await _client._open(_request!, _token);
+      iterator = StreamIterator(
+        parseSSE(_network!.body, _client.settings.maxCollectedBytes),
+      );
+      while (await _token.bind(iterator.moveNext())) {
+        final event = iterator.current;
         _token.throwIfCancelled();
         if (event.done) {
           response.done = true;
@@ -362,9 +430,17 @@ class ChatStream extends Stream<String> {
       if (_timedOut) throw DuckAIException(504, 'Duck.ai request timed out');
       rethrow;
     } finally {
-      remove?.call();
-      if (_acquired) _finish?.call(this);
-      await close();
+      try {
+        await iterator?.cancel();
+      } finally {
+        remove?.call();
+        releaseSession?.call();
+        try {
+          if (_acquired) _finish?.call(this);
+        } finally {
+          _cleanup();
+        }
+      }
     }
   }
 }
@@ -373,7 +449,7 @@ class Conversation {
   final DuckAI _client;
   final ChatOptions _defaults;
   List<Message> _history;
-  bool _busy = false;
+  final _gate = AsyncGate();
   int _active = 0;
   Conversation._(this._client, this._defaults)
     : _history = cloneJson<List<dynamic>>(_defaults.messages).cast<Message>();
@@ -387,6 +463,7 @@ class Conversation {
   ChatStream stream(String prompt, {ChatOptions? options}) {
     _client._check();
     final selected = _defaults.merge(options);
+    void Function()? release;
     final stream = ChatStream._(
       _client,
       prompt,
@@ -394,12 +471,8 @@ class Conversation {
       acquire: (token) async {
         _active++;
         try {
-          while (_busy) {
-            token.throwIfCancelled();
-            await Future<void>.delayed(const Duration(milliseconds: 10));
-          }
-          token.throwIfCancelled();
-          _busy = true;
+          // The lease belongs to this turn, not to the conversation closure.
+          release = await _gate.acquire(token);
           return selected.withMessages(messages, cancellationToken: token);
         } catch (_) {
           _active--;
@@ -412,7 +485,7 @@ class Conversation {
             stream._request!['messages'] as List,
           ).cast<Message>())..add(stream.response.assistantMessage);
         }
-        _busy = false;
+        release?.call();
         _active--;
       },
     );
